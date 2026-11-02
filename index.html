@@ -10,17 +10,17 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
   #wrap { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    width:min(100vw, 133.333vh); aspect-ratio:4/3;
-    font-size:max(9px, calc(min(100vw, 133.333vh) / 50)); }
-  @supports (height:100dvh) { #wrap { width:min(100vw, 133.333dvh); font-size:max(9px, calc(min(100vw, 133.333dvh) / 50)); } }
+    width:min(100vw, 56.25vh); aspect-ratio:9/16;
+    font-size:max(9px, calc(min(100vw, 56.25vh) / 36)); }
+  @supports (height:100dvh) { #wrap { width:min(100vw, 56.25dvh); font-size:max(9px, calc(min(100vw, 56.25dvh) / 36)); } }
   canvas { width:100%; height:100%; display:block; touch-action:none; }
   #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     background:rgba(5,6,14,.62); overflow:auto; }
   #overlay.hidden { display:none; }
   .card { background:var(--panel); border:.2em solid #3a3f66; border-radius:1em; padding:1.4em 1.8em;
-    width:min(34em, 92%); max-height:96%; overflow:auto; box-sizing:border-box; color:var(--ink);
+    width:min(30em, 94%); max-height:96%; overflow:auto; box-sizing:border-box; color:var(--ink);
     text-align:center; box-shadow:0 1em 3em rgba(0,0,0,.6); }
-  h1 { margin:0 0 .15em; font-size:2.6em; letter-spacing:.04em; color:var(--accent);
+  h1 { margin:0 0 .15em; font-size:2.2em; letter-spacing:.04em; color:var(--accent);
     text-shadow:.07em .07em 0 #7a3b00, 0 0 .6em rgba(255,207,74,.35); }
   .sub { margin:0 0 1em; opacity:.8; font-size:1em; }
   .result { margin:.2em 0 1em; padding:.7em .9em; background:rgba(255,255,255,.07); border-radius:.6em; line-height:1.45; }
@@ -45,7 +45,7 @@
 </head>
 <body>
 <div id="wrap">
-  <canvas id="cv" width="800" height="600"></canvas>
+  <canvas id="cv" width="450" height="800"></canvas>
   <button id="mute" title="Sound on/off" aria-label="Toggle sound">🔊</button>
   <div id="overlay"><div class="card" id="card"></div></div>
 </div>
@@ -55,11 +55,12 @@
 'use strict';
 
 /* ------------------------------------------------------------------ constants */
-const W = 800, H = 600;
-const DTOP = 470;              // top of the dumpster body (flaps sit on this line)
-const GROUND = 556;
+const W = 450, H = 800;        // tall + narrow playfield, same on every device
+const DTOP = 670;              // top of the dumpster body (flaps sit on this line)
+const GROUND = 756;
+const ITEM_COUNT = 9;
 const GRAV = 1000;
-const DW = 130;                // dumpster width
+const DW = 112;                // dumpster width
 const FLAP = DW / 2;
 const HR = 15;                 // hobo collision radius
 const MAX_LV = 8;
@@ -88,10 +89,10 @@ const costOf = u => Math.round(u.base * Math.pow(u.grow, S[u.id]));
 
 function stats() {
   return {
-    accel:  250 + S.speed * 150,
-    maxV:   230 + S.speed * 65,
-    decel: (250 + S.speed * 150) * 1.35,
-    launch: 640 + S.height * 48,
+    accel:  150 + S.speed * 90,
+    maxV:   140 + S.speed * 40,
+    decel: (150 + S.speed * 90) * 1.35,
+    launch: 640 + S.height * 54,
   };
 }
 const MAX_LAUNCH = Math.sqrt(2 * GRAV * (DTOP - HR - 60));   // keep the apex on screen
@@ -111,37 +112,40 @@ const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2
 (function paintBackground() {
   const c = bg.getContext('2d'); c.scale(2, 2);
   let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const sky = c.createLinearGradient(0, 0, 0, 470);
-  sky.addColorStop(0, '#0b0e2c'); sky.addColorStop(.55, '#3a2459'); sky.addColorStop(1, '#a5506a');
+  const WALL = GROUND - 136;
+  const sky = c.createLinearGradient(0, 0, 0, WALL);
+  sky.addColorStop(0, '#0b0e2c'); sky.addColorStop(.6, '#3a2459'); sky.addColorStop(1, '#a5506a');
   c.fillStyle = sky; c.fillRect(0, 0, W, H);
-  for (let i = 0; i < 70; i++) { c.fillStyle = `rgba(255,255,255,${.25 + rnd() * .6})`; c.fillRect(rnd() * W, rnd() * 260, 1.6, 1.6); }
-  const moon = c.createRadialGradient(650, 90, 8, 650, 90, 70);
+  for (let i = 0; i < 80; i++) { c.fillStyle = `rgba(255,255,255,${.25 + rnd() * .6})`; c.fillRect(rnd() * W, rnd() * 420, 1.6, 1.6); }
+  const moon = c.createRadialGradient(350, 110, 8, 350, 110, 80);
   moon.addColorStop(0, 'rgba(255,248,214,.95)'); moon.addColorStop(.35, 'rgba(255,248,214,.25)'); moon.addColorStop(1, 'rgba(255,248,214,0)');
-  c.fillStyle = moon; c.fillRect(560, 0, 200, 200);
-  c.fillStyle = '#fff6d2'; c.beginPath(); c.arc(650, 90, 24, 0, 7); c.fill();
-  // skyline
-  for (let x = -10; x < W; ) {
-    const bw = 40 + rnd() * 55, bh = 110 + rnd() * 190;
-    c.fillStyle = '#15162e'; c.fillRect(x, 430 - bh, bw, bh + 60);
-    for (let wy = 430 - bh + 12; wy < 420; wy += 18) for (let wx = x + 6; wx < x + bw - 8; wx += 14)
-      if (rnd() < .28) { c.fillStyle = rnd() < .8 ? '#f0c85a' : '#8fd0ff'; c.fillRect(wx, wy, 6, 8); }
-    x += bw + 2;
+  c.fillStyle = moon; c.fillRect(250, 10, 200, 200);
+  c.fillStyle = '#fff6d2'; c.beginPath(); c.arc(350, 110, 24, 0, 7); c.fill();
+  // skyline (two layers for depth)
+  for (const [col, lo, hi, alpha] of [['#1d1a3d', 130, 330, 1], ['#15162e', 90, 260, 1]]) {
+    for (let x = -10; x < W; ) {
+      const bw = 34 + rnd() * 40, bh = lo + rnd() * (hi - lo);
+      c.fillStyle = col; c.fillRect(x, WALL + 10 - bh, bw, bh + 60);
+      if (col === '#15162e') for (let wy = WALL + 10 - bh + 12; wy < WALL - 8; wy += 18) for (let wx = x + 6; wx < x + bw - 8; wx += 14)
+        if (rnd() < .28) { c.fillStyle = rnd() < .8 ? '#f0c85a' : '#8fd0ff'; c.fillRect(wx, wy, 6, 8); }
+      x += bw + 2;
+    }
   }
   // brick wall
-  c.fillStyle = '#4a3038'; c.fillRect(0, 420, W, 140);
+  c.fillStyle = '#4a3038'; c.fillRect(0, WALL, W, GROUND - WALL);
   c.strokeStyle = 'rgba(0,0,0,.28)'; c.lineWidth = 1;
-  for (let y = 420, row = 0; y < 560; y += 14, row++) {
+  for (let y = WALL, row = 0; y < GROUND; y += 14, row++) {
     c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke();
     for (let x = (row % 2) * 20; x < W; x += 40) { c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 14); c.stroke(); }
   }
-  const fade = c.createLinearGradient(0, 420, 0, 560);
+  const fade = c.createLinearGradient(0, WALL, 0, GROUND);
   fade.addColorStop(0, 'rgba(0,0,0,.35)'); fade.addColorStop(1, 'rgba(0,0,0,0)');
-  c.fillStyle = fade; c.fillRect(0, 420, W, 140);
+  c.fillStyle = fade; c.fillRect(0, WALL, W, GROUND - WALL);
   // ground
   c.fillStyle = '#23242e'; c.fillRect(0, GROUND, W, H - GROUND);
   c.fillStyle = '#34364a'; c.fillRect(0, GROUND, W, 4);
   c.fillStyle = 'rgba(255,255,255,.07)';
-  for (let i = 0; i < 50; i++) c.fillRect(rnd() * W, GROUND + 8 + rnd() * 30, 3 + rnd() * 8, 1.5);
+  for (let i = 0; i < 30; i++) c.fillRect(rnd() * W, GROUND + 8 + rnd() * 30, 3 + rnd() * 8, 1.5);
 })();
 
 /* ------------------------------------------------------------------ audio (tiny synth) */
@@ -185,10 +189,10 @@ function pickType() {
   return ITEM_TYPES[0];
 }
 function newItem() {
-  const t = pickType(), ymin = 70, ymax = DTOP - 95;
+  const t = pickType(), ymin = 80, ymax = DTOP - 95;
   const y0 = ymax - (ymax - ymin) * Math.pow(Math.random(), 1 / (1 + t.v * .08));
-  const sp = t.fast ? rand(60, 110) : rand(10, 38);
-  return { t, x: rand(50, W - 50), y0, y: y0, vx: (Math.random() < .5 ? -1 : 1) * sp,
+  const sp = t.fast ? rand(40, 75) : rand(8, 24);
+  return { t, x: rand(40, W - 40), y0, y: y0, vx: (Math.random() < .5 ? -1 : 1) * sp,
            ph: rand(0, 6.28), bobA: t.fast ? 10 : 5, bobF: rand(1.5, 3), age: 0 };
 }
 
@@ -212,7 +216,7 @@ function newRun() {
     shake: 0, time: 0, overT: 0, slam: 0, deadWho: 0,
   };
   run.lid[run.closed] = 0; run.lid[opp(run.closed)] = 1;
-  for (let i = 0; i < 8; i++) run.items.push(newItem());
+  for (let i = 0; i < ITEM_COUNT; i++) run.items.push(newItem());
   return run;
 }
 const flapX = (side) => G.x + (side === 'L' ? -FLAP / 2 : FLAP / 2);
@@ -274,8 +278,8 @@ function floatText(x, y, txt, col = '#fff') { G.floats.push({ x, y, txt, col, li
 function launch(t) {
   const x0 = flapX(G.closed);
   const vy = -Math.min(MAX_LAUNCH, ST.launch + t * 110);
-  const spread = Math.min(40 + G.streak * 7, 220);
-  const vx = (W / 2 - x0) * .3 + rand(-1, 1) * spread;
+  const spread = Math.min(25 + G.streak * 4, 130);
+  const vx = (W / 2 - x0) * .35 + rand(-1, 1) * spread;
   G.air = { who: G.inside, x: x0, y: DTOP - 24, vx, vy, t: 0, bonked: false };
   G.lid[G.closed] = .55;             // flap flung open by the launch
   G.slam = .18;
@@ -334,7 +338,7 @@ function update(dt) {
     if (it.x < 30 || it.x > W - 30) { it.vx = -it.vx; it.x = clamp(it.x, 30, W - 30); }
     it.y = it.y0 + Math.sin(it.age * it.bobF + it.ph) * it.bobA;
   }
-  if (G.phase !== 'over' && G.items.length < 8) {
+  if (G.phase !== 'over' && G.items.length < ITEM_COUNT) {
     G.spawnT -= dt;
     if (G.spawnT <= 0) { G.items.push(newItem()); G.spawnT = rand(.4, 1.1); }
   }
@@ -535,7 +539,7 @@ function drawScene() {
     ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
     for (let i = 0; i < 3; i++) { const an = s.t * 5 + i * 2.1; ctx.fillText('★', Math.cos(an) * 22, -22 + Math.sin(an) * 6); }
     ctx.font = '900 26px system-ui'; ctx.lineWidth = 5; ctx.strokeStyle = '#3a0d00'; ctx.fillStyle = '#ffcf4a';
-    const ty = -48 - Math.min(s.t, .6) * 30; ctx.strokeText('SPLAT!', 0, ty); ctx.fillText('SPLAT!', 0, ty);
+    const ty = -48 - Math.min(s.t, .6) * 30, tx = clamp(s.x, 62, W - 62) - s.x; ctx.strokeText('SPLAT!', tx, ty); ctx.fillText('SPLAT!', tx, ty);
     ctx.restore();
   }
   drawDumpster();
@@ -566,20 +570,22 @@ function drawHud() {
   hudText(`$${G.cash}`, 16, 40, 34, '#7dffa0');
   if (G.phase === 'fly' || G.phase === 'dead') {
     const mult = 1 + Math.min(4, Math.floor(G.streak / 5));
-    hudText(`${G.streak} bounce${G.streak === 1 ? '' : 's'}${mult > 1 ? `  ×${mult}` : ''}`, W / 2, 36, 24, '#ffe27a', 'center');
+    hudText(`${G.streak} bounce${G.streak === 1 ? '' : 's'}${mult > 1 ? `  ×${mult}` : ''}`, W / 2 + 10, 34, 20, '#ffe27a', 'center');
   }
   if (G.phase === 'ready' && !menuOpen) {
     const blink = .6 + Math.sin(G.time * 5) * .4;
     ctx.globalAlpha = blink;
-    hudText('TAP · CLICK · PRESS ← →', W / 2, 150, 30, '#fff', 'center');
+    hudText('TAP · CLICK', W / 2, 200, 38, '#fff', 'center');
+    hudText('or press ← →', W / 2, 238, 26, '#fff', 'center');
     ctx.globalAlpha = .85;
-    hudText('then steer — the dumpster chases your cursor or finger', W / 2, 184, 17, '#ffe27a', 'center');
+    hudText('then steer: the dumpster chases', W / 2, 282, 16, '#ffe27a', 'center');
+    hudText('your cursor or finger', W / 2, 303, 16, '#ffe27a', 'center');
     ctx.globalAlpha = 1;
   }
   if (paused && !menuOpen) {
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, W, H);
     hudText('PAUSED', W / 2, H / 2 - 6, 54, '#fff', 'center');
-    hudText('tap, click or press a key to keep diving', W / 2, H / 2 + 34, 20, '#ffe27a', 'center');
+    hudText('tap, click or press a key', W / 2, H / 2 + 30, 18, '#ffe27a', 'center');
   }
 }
 
