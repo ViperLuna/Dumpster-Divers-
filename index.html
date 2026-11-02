@@ -65,6 +65,7 @@ const GRAV = 1000;
 const HR = 15;                    // hobo collision radius
 const MAX_LV = 25;
 const CLONE_CAP = 6;
+const CLONE_HOPS = 2;             // times the dumpster's hole can bounce one clone back up
 const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
 const FLING = 4;                  // launch sideways speed per px landed off-centre
@@ -194,6 +195,7 @@ const synth = {
   bonk()       { tone(140, .16, 'square', .09, -60); },
   splat()      { tone(170, .4, 'sawtooth', .1, -140); tone(90, .3, 'square', .08, -40, .05); },
   cloneSplat() { tone(300, .18, 'sawtooth', .05, -200); },
+  cloneHop()   { tone(420, .14, 'triangle', .07, 360); },
   powerup()    { tone(520, .1, 'square', .06); tone(780, .1, 'square', .06, 0, .08); tone(1040, .2, 'square', .06, 0, .16); },
   dup()        { tone(700, .08, 'triangle', .06); tone(900, .1, 'triangle', .06, 0, .06); },
   hazard()     { tone(240, .2, 'sawtooth', .08, -120); },
@@ -541,6 +543,26 @@ function groundHit(a) {
   G.deadWho = a.who; G.air = null; G.phase = 'dead'; G.overT = 1.5;
 }
 
+/* Clones can use the dumpster too: the closed flap bounces them off, and the open hole throws them back up
+   (same "land left, fly right" rule). The dumpster only saves each clone a couple of times. */
+function cloneVsDumpster(c, prevBottom) {
+  const f = flap(), bottom = c.y + HR, level = DTOP - 6;
+  if (!(c.vy > 0 && bottom >= level && prevBottom <= level + 6)) return;
+  const dh = wd(c.x, flapCenter(opp(G.closed))), dc = wd(c.x, flapCenter(G.closed));
+  if (Math.abs(dh) <= f / 2 + 6 && (c.hops || 0) < CLONE_HOPS) {
+    c.hops = (c.hops || 0) + 1;
+    c.y = level - HR - 1; c.chute = null;
+    c.vy = -ST.launch * rand(.6, .85);
+    c.vx = -FLING * dh + rand(-1, 1) * 30;
+    burst(c.x, DTOP - 6, 8, ['#fff', '#ffe27a'], 150, .35);
+    floatText(c.x, DTOP - 36, 'BOING!', '#c9a0ff'); sfx.cloneHop();
+  } else if (Math.abs(dc) <= f / 2 + 4) {
+    c.y = level - HR - 1;
+    c.vy = -280; c.vx = (dc < 0 ? -1 : 1) * rand(160, 260);
+    sfx.bonk();
+  }
+}
+
 /* ============================================================== update */
 function update(dt) {
   G.time += dt;
@@ -574,7 +596,9 @@ function update(dt) {
 
   // clones live their own lives, on screen or off
   for (let i = G.clones.length - 1; i >= 0; i--) {
-    const c = G.clones[i]; physics(c, dt); touchObjects(c, false);
+    const c = G.clones[i], prevBottom = c.y + HR;
+    physics(c, dt); touchObjects(c, false);
+    cloneVsDumpster(c, prevBottom);
     if (c.y + HR >= GROUND) {
       G.splats.push({ x: c.x, t: 0, pal: c.pal, big: false });
       burst(c.x, GROUND - 6, 10, ['#fff', '#ffe27a'], 200, .5); sfx.cloneSplat();
