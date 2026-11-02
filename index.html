@@ -42,6 +42,18 @@
   .go { display:block; width:100%; margin-top:.9em; font-size:1.5em; padding:.55em; background:#7dffa0; box-shadow:0 .2em 0 #2f8f4c; }
   .hint { margin-top:.8em; opacity:.7; font-size:.82em; line-height:1.4; }
   .reset { margin-top:.6em; background:none; box-shadow:none; color:#99a; font-weight:500; font-size:.75em; padding:.2em; text-decoration:underline; }
+  #title { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:linear-gradient(to bottom, #0b1036 0%, #0b1036 32%, #10112a 62%, #07080f 100%); }
+  #title.hidden { display:none; }
+  /* the whole image, uncropped; its top edge matches the background colour so there is no seam */
+  #title .art { width:100%; aspect-ratio:1376/768;
+    -webkit-mask-image:linear-gradient(to bottom, #000 0, #000 84%, transparent 100%);
+            mask-image:linear-gradient(to bottom, #000 0, #000 84%, transparent 100%); }
+  #title .art img { width:100%; height:100%; display:block; }
+  #start { margin-top:1.4em; font-size:2em; padding:.5em 1.6em; background:#7dffa0; box-shadow:0 .2em 0 #2f8f4c; letter-spacing:.06em;
+    animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform:scale(1.05); } }
+  #title .tip { margin-top:1.1em; color:var(--ink); opacity:.75; font-size:.9em; text-align:center; line-height:1.5; text-shadow:0 .1em .3em #000; }
   #mute { position:absolute; right:.6em; top:.6em; z-index:5; padding:.3em .55em; font-size:1.2em; background:rgba(0,0,0,.45);
     color:#fff; box-shadow:none; border-radius:.5em; }
 </style>
@@ -50,7 +62,12 @@
 <div id="wrap">
   <canvas id="cv" width="450" height="800"></canvas>
   <button id="mute" title="Sound on/off" aria-label="Toggle sound">🔊</button>
-  <div id="overlay"><div class="card" id="card"></div></div>
+  <div id="overlay" class="hidden"><div class="card" id="card"></div></div>
+  <div id="title">
+    <div class="art"><img src="assets/title.jpg" alt="Dumpster Divers: a Viperbot game" draggable="false"></div>
+    <button id="start">START</button>
+    <div class="tip">Bounce the hobos, grab the junk, don’t hit the pavement.<br>Steer with your mouse, finger, or ← → keys.</div>
+  </div>
 </div>
 
 <script>
@@ -317,7 +334,7 @@ window.addEventListener('pointerdown', e => {
 const LEFTS = ['ArrowLeft', 'a', 'A'], RIGHTS = ['ArrowRight', 'd', 'D'];
 window.addEventListener('keydown', e => {
   if (menuOpen) {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.tagName !== 'BUTTON') { e.preventDefault(); startRun(); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.tagName !== 'BUTTON') { e.preventDefault(); if (titleOpen()) startFromTitle(); else startRun(); }
     return;
   }
   if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') { paused = !paused; return; }
@@ -874,8 +891,17 @@ function drawHud() {
 
 /* ============================================================== menu / shop (DOM) */
 const overlay = document.getElementById('overlay'), card = document.getElementById('card');
+const title = document.getElementById('title');
+function titleOpen() { return !title.classList.contains('hidden'); }
+function showTitle() { menuOpen = true; overlay.classList.add('hidden'); title.classList.remove('hidden'); }
+/* START: if you can afford an upgrade you land in the shop first; otherwise you go straight into a run. */
+function startFromTitle() {
+  audio(); title.classList.add('hidden');
+  if (UPGRADES.some(u => S[u.id] < MAX_LV && S.cash >= costOf(u))) showMenu(null); else startRun();
+}
+document.getElementById('start').addEventListener('click', startFromTitle);
 function showMenu(res) {
-  lastResult = res; menuOpen = true; overlay.classList.remove('hidden');
+  lastResult = res; menuOpen = true; title.classList.add('hidden'); overlay.classList.remove('hidden');
   const first = !res;
   card.innerHTML = `
     <h1>DUMPSTER DIVERS</h1>
@@ -936,7 +962,7 @@ function frame(now) {
 }
 
 newRun();
-showMenu(null);
+showTitle();
 requestAnimationFrame(frame);
 
 // small hook so the game can be driven by automated tests

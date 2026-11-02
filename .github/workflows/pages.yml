@@ -26,6 +26,8 @@ jobs:
         run: |
           mkdir _site
           cp index.html _site/
+          cp -r assets _site/
+          if [ -d sounds ]; then cp -r sounds _site/; fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
