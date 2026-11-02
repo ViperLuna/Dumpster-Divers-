@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Dumpster Divers</title>
+<style>
+  :root { color-scheme: dark; --ink:#f4ead2; --accent:#ffcf4a; --panel:rgba(12,14,26,.88); }
+  html, body { margin:0; height:100%; background:#07080f; overflow:hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+  #wrap { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(100vw, 133.333vh); aspect-ratio:4/3;
+    font-size:max(9px, calc(min(100vw, 133.333vh) / 50)); }
+  @supports (height:100dvh) { #wrap { width:min(100vw, 133.333dvh); font-size:max(9px, calc(min(100vw, 133.333dvh) / 50)); } }
+  canvas { width:100%; height:100%; display:block; touch-action:none; }
+  #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(5,6,14,.62); overflow:auto; }
+  #overlay.hidden { display:none; }
+  .card { background:var(--panel); border:.2em solid #3a3f66; border-radius:1em; padding:1.4em 1.8em;
+    width:min(34em, 92%); max-height:96%; overflow:auto; box-sizing:border-box; color:var(--ink);
+    text-align:center; box-shadow:0 1em 3em rgba(0,0,0,.6); }
+  h1 { margin:0 0 .15em; font-size:2.6em; letter-spacing:.04em; color:var(--accent);
+    text-shadow:.07em .07em 0 #7a3b00, 0 0 .6em rgba(255,207,74,.35); }
+  .sub { margin:0 0 1em; opacity:.8; font-size:1em; }
+  .result { margin:.2em 0 1em; padding:.7em .9em; background:rgba(255,255,255,.07); border-radius:.6em; line-height:1.45; }
+  .result b { color:var(--accent); }
+  .cash { font-size:1.5em; font-weight:800; margin:.3em 0 .6em; }
+  .cash span { color:#7dffa0; }
+  .row { display:flex; align-items:center; gap:.9em; text-align:left; padding:.7em .8em; margin:.5em 0;
+    background:rgba(255,255,255,.06); border-radius:.7em; }
+  .row .nm { flex:1; } .row .nm b { display:block; font-size:1.15em; }
+  .row .nm small { opacity:.7; font-size:.85em; } .pips { letter-spacing:.12em; font-size:.8em; color:var(--accent); margin-top:.2em; }
+  button { font:inherit; cursor:pointer; border:0; border-radius:.6em; padding:.6em 1em; font-weight:800; color:#1b1200;
+    background:var(--accent); box-shadow:0 .2em 0 #a56a00; }
+  button:active { transform:translateY(.15em); box-shadow:0 .05em 0 #a56a00; }
+  button:disabled { background:#555a70; color:#aab; box-shadow:none; cursor:not-allowed; }
+  .row button { min-width:5.5em; }
+  .go { display:block; width:100%; margin-top:1em; font-size:1.5em; padding:.55em; background:#7dffa0; box-shadow:0 .2em 0 #2f8f4c; }
+  .hint { margin-top:.9em; opacity:.7; font-size:.85em; line-height:1.4; }
+  .reset { margin-top:.7em; background:none; box-shadow:none; color:#99a; font-weight:500; font-size:.75em; padding:.2em; text-decoration:underline; }
+  #mute { position:absolute; right:.6em; top:.6em; z-index:5; padding:.3em .55em; font-size:1.2em; background:rgba(0,0,0,.45);
+    color:#fff; box-shadow:none; border-radius:.5em; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv" width="800" height="600"></canvas>
+  <button id="mute" title="Sound on/off" aria-label="Toggle sound">🔊</button>
+  <div id="overlay"><div class="card" id="card"></div></div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ------------------------------------------------------------------ constants */
+const W = 800, H = 600;
+const DTOP = 470;              // top of the dumpster body (flaps sit on this line)
+const GROUND = 556;
+const GRAV = 1000;
+const DW = 130;                // dumpster width
+const FLAP = DW / 2;
+const HR = 15;                 // hobo collision radius
+const MAX_LV = 8;
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const lerp = (a, b, t) => a + (b - a) * t;
+const opp = s => (s === 'L' ? 'R' : 'L');
+
+const HOBOS = [
+  { name: 'Gutter Gary', pal: { coat:'#4c9a47', coat2:'#2f6b2f', hat:'#2f6b2f', hat2:'#7bd36f', pants:'#6b5a3a', shoe:'#2a2118', skin:'#e2b58c', patch:'#e8d36a' } },
+  { name: 'Dumpy Dave',  pal: { coat:'#c8483a', coat2:'#8c2c22', hat:'#e8b923', hat2:'#fff1a8', pants:'#34518a', shoe:'#1c1c26', skin:'#b9835a', patch:'#6fb0e0' } },
+];
+
+/* ------------------------------------------------------------------ save data */
+const SAVE_KEY = 'dumpsterDivers.v2';
+let S = { cash: 0, speed: 0, height: 0, best: 0, muted: false };
+try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) {}
+function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
+
+const UPGRADES = [
+  { id: 'speed',  name: 'Dumpster Speed',  desc: 'Gets moving sooner and goes faster', base: 10, grow: 1.7 },
+  { id: 'height', name: 'Launch Height',   desc: 'Hobos fly higher, reach pricier junk', base: 12, grow: 1.7 },
+];
+const costOf = u => Math.round(u.base * Math.pow(u.grow, S[u.id]));
+
+function stats() {
+  return {
+    accel:  250 + S.speed * 150,
+    maxV:   230 + S.speed * 65,
+    decel: (250 + S.speed * 150) * 1.35,
+    launch: 640 + S.height * 48,
+  };
+}
+const MAX_LAUNCH = Math.sqrt(2 * GRAV * (DTOP - HR - 60));   // keep the apex on screen
+
+/* ------------------------------------------------------------------ canvas setup */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const r = cv.getBoundingClientRect();
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+}
+window.addEventListener('resize', resize); resize();
+
+/* ------------------------------------------------------------------ background (pre-rendered) */
+const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
+(function paintBackground() {
+  const c = bg.getContext('2d'); c.scale(2, 2);
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const sky = c.createLinearGradient(0, 0, 0, 470);
+  sky.addColorStop(0, '#0b0e2c'); sky.addColorStop(.55, '#3a2459'); sky.addColorStop(1, '#a5506a');
+  c.fillStyle = sky; c.fillRect(0, 0, W, H);
+  for (let i = 0; i < 70; i++) { c.fillStyle = `rgba(255,255,255,${.25 + rnd() * .6})`; c.fillRect(rnd() * W, rnd() * 260, 1.6, 1.6); }
+  const moon = c.createRadialGradient(650, 90, 8, 650, 90, 70);
+  moon.addColorStop(0, 'rgba(255,248,214,.95)'); moon.addColorStop(.35, 'rgba(255,248,214,.25)'); moon.addColorStop(1, 'rgba(255,248,214,0)');
+  c.fillStyle = moon; c.fillRect(560, 0, 200, 200);
+  c.fillStyle = '#fff6d2'; c.beginPath(); c.arc(650, 90, 24, 0, 7); c.fill();
+  // skyline
+  for (let x = -10; x < W; ) {
+    const bw = 40 + rnd() * 55, bh = 110 + rnd() * 190;
+    c.fillStyle = '#15162e'; c.fillRect(x, 430 - bh, bw, bh + 60);
+    for (let wy = 430 - bh + 12; wy < 420; wy += 18) for (let wx = x + 6; wx < x + bw - 8; wx += 14)
+      if (rnd() < .28) { c.fillStyle = rnd() < .8 ? '#f0c85a' : '#8fd0ff'; c.fillRect(wx, wy, 6, 8); }
+    x += bw + 2;
+  }
+  // brick wall
+  c.fillStyle = '#4a3038'; c.fillRect(0, 420, W, 140);
+  c.strokeStyle = 'rgba(0,0,0,.28)'; c.lineWidth = 1;
+  for (let y = 420, row = 0; y < 560; y += 14, row++) {
+    c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke();
+    for (let x = (row % 2) * 20; x < W; x += 40) { c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 14); c.stroke(); }
+  }
+  const fade = c.createLinearGradient(0, 420, 0, 560);
+  fade.addColorStop(0, 'rgba(0,0,0,.35)'); fade.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = fade; c.fillRect(0, 420, W, 140);
+  // ground
+  c.fillStyle = '#23242e'; c.fillRect(0, GROUND, W, H - GROUND);
+  c.fillStyle = '#34364a'; c.fillRect(0, GROUND, W, 4);
+  c.fillStyle = 'rgba(255,255,255,.07)';
+  for (let i = 0; i < 50; i++) c.fillRect(rnd() * W, GROUND + 8 + rnd() * 30, 3 + rnd() * 8, 1.5);
+})();
+
+/* ------------------------------------------------------------------ audio (tiny synth) */
+let ac = null;
+function audio() {
+  if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (ac && ac.state === 'suspended') ac.resume();
+}
+function tone(f, d, type = 'square', vol = .06, slide = 0, delay = 0) {
+  if (!ac || S.muted) return;
+  const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f + slide), t + d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+  o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + d + .03);
+}
+const sfx = {
+  launch() { tone(200, .28, 'square', .07, 520); },
+  jump()   { tone(300, .15, 'square', .05, 300); },
+  coin()   { tone(880, .08, 'square', .05); tone(1320, .12, 'square', .05, 0, .07); },
+  slam()   { tone(110, .14, 'triangle', .12, -50); },
+  splat()  { tone(170, .4, 'sawtooth', .1, -140); tone(90, .3, 'square', .08, -40, .05); },
+};
+const muteBtn = document.getElementById('mute');
+function paintMute() { muteBtn.textContent = S.muted ? '🔇' : '🔊'; }
+muteBtn.addEventListener('click', e => { e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio(); });
+paintMute();
+
+/* ------------------------------------------------------------------ items */
+const ITEM_TYPES = [
+  { e: '🥫', v: 1,  w: 38, r: 16 },
+  { e: '🍾', v: 2,  w: 26, r: 16 },
+  { e: '🛍️', v: 3,  w: 16, r: 17 },
+  { e: '🐦', v: 5,  w: 12, r: 16, fast: true },
+  { e: '🍕', v: 10, w: 6,  r: 17 },
+  { e: '💰', v: 25, w: 2,  r: 18 },
+];
+function pickType() {
+  let tot = ITEM_TYPES.reduce((a, t) => a + t.w, 0), r = Math.random() * tot;
+  for (const t of ITEM_TYPES) { if ((r -= t.w) <= 0) return t; }
+  return ITEM_TYPES[0];
+}
+function newItem() {
+  const t = pickType(), ymin = 70, ymax = DTOP - 95;
+  const y0 = ymax - (ymax - ymin) * Math.pow(Math.random(), 1 / (1 + t.v * .08));
+  const sp = t.fast ? rand(60, 110) : rand(10, 38);
+  return { t, x: rand(50, W - 50), y0, y: y0, vx: (Math.random() < .5 ? -1 : 1) * sp,
+           ph: rand(0, 6.28), bobA: t.fast ? 10 : 5, bobF: rand(1.5, 3), age: 0 };
+}
+
+/* ------------------------------------------------------------------ run state */
+let G = null, ST = stats();
+let menuOpen = true, paused = false;
+
+function newRun() {
+  ST = stats();
+  const jumper = Math.random() < .5 ? 0 : 1;
+  const run = {
+    phase: 'ready',            // ready -> jump -> fly -> dead -> over
+    x: W / 2, v: 0,
+    closed: Math.random() < .5 ? 'L' : 'R',
+    lid: { L: 0, R: 0 },       // 0 = shut, 1 = wide open
+    jumper, inside: 1 - jumper,
+    jumpT: 0,
+    air: null,
+    cash: 0, streak: 0, bestStreak: 0, catches: 0,
+    items: [], spawnT: 0, parts: [], floats: [], splats: [],
+    shake: 0, time: 0, overT: 0, slam: 0, deadWho: 0,
+  };
+  run.lid[run.closed] = 0; run.lid[opp(run.closed)] = 1;
+  for (let i = 0; i < 8; i++) run.items.push(newItem());
+  return run;
+}
+const flapX = (side) => G.x + (side === 'L' ? -FLAP / 2 : FLAP / 2);
+
+/* ------------------------------------------------------------------ input */
+let target = null, keyDir = 0;
+const keys = { left: false, right: false };
+
+function toLogicalX(e) {
+  const r = cv.getBoundingClientRect();
+  return clamp((e.clientX - r.left) * (W / r.width), 0, W);
+}
+function begin() {
+  if (!G || menuOpen || paused || G.phase !== 'ready') return;
+  audio(); G.phase = 'jump'; G.jumpT = 0; sfx.jump();
+}
+window.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || e.buttons) target = toLogicalX(e); keyDir = keyDir; });
+window.addEventListener('pointerdown', e => {
+  if (e.target.closest && e.target.closest('#mute')) return;
+  if (menuOpen) return;
+  if (paused) { paused = false; return; }
+  target = toLogicalX(e); keyDir = 0; keys.left = keys.right = false;
+  begin();
+});
+const LEFTS = ['ArrowLeft', 'a', 'A'], RIGHTS = ['ArrowRight', 'd', 'D'];
+window.addEventListener('keydown', e => {
+  if (menuOpen) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.tagName !== 'BUTTON') { e.preventDefault(); startRun(); }
+    return;
+  }
+  if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') { paused = !paused; return; }
+  if (e.key === 'm' || e.key === 'M') { muteBtn.click(); return; }
+  const l = LEFTS.includes(e.key), r = RIGHTS.includes(e.key);
+  if (l || r || e.key === ' ') e.preventDefault();
+  if (paused && (l || r)) paused = false;
+  if (l) keys.left = true; if (r) keys.right = true;
+  if (l || r) { target = null; keyDir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0); begin(); }
+  else if (e.key === ' ') begin();
+});
+window.addEventListener('keyup', e => {
+  if (LEFTS.includes(e.key)) keys.left = false;
+  if (RIGHTS.includes(e.key)) keys.right = false;
+  keyDir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && G && !menuOpen && G.phase !== 'over') paused = true; });
+window.addEventListener('blur', () => { if (G && !menuOpen && G.phase !== 'over') paused = true; });
+
+/* ------------------------------------------------------------------ particles / floaters */
+function burst(x, y, n, cols, sp = 220, life = .6) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, 6.283), s = rand(sp * .3, sp);
+    G.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: rand(life * .5, life), max: life,
+                   c: cols[(Math.random() * cols.length) | 0], s: rand(2, 5) });
+  }
+}
+function floatText(x, y, txt, col = '#fff') { G.floats.push({ x, y, txt, col, life: 1 }); }
+
+/* ------------------------------------------------------------------ gameplay */
+function launch(t) {
+  const x0 = flapX(G.closed);
+  const vy = -Math.min(MAX_LAUNCH, ST.launch + t * 110);
+  const spread = Math.min(40 + G.streak * 7, 220);
+  const vx = (W / 2 - x0) * .3 + rand(-1, 1) * spread;
+  G.air = { who: G.inside, x: x0, y: DTOP - 24, vx, vy, t: 0, bonked: false };
+  G.lid[G.closed] = .55;             // flap flung open by the launch
+  G.slam = .18;
+  burst(x0, DTOP - 8, 12, ['#ddd', '#a8a8b8', '#fff'], 180, .45);
+  sfx.launch();
+}
+function swapFlaps() { G.closed = opp(G.closed); }
+
+function steer(dt) {
+  const w = DW / 2 + 4;
+  let vDes = 0;
+  if (keyDir) vDes = keyDir * ST.maxV;
+  else if (target != null) {
+    const d = target - G.x;
+    vDes = Math.sign(d) * Math.min(ST.maxV, Math.sqrt(2 * ST.decel * Math.abs(d)) * .9);
+    if (Math.abs(d) < 2) vDes = 0;
+  }
+  const dv = vDes - G.v;
+  const braking = G.v !== 0 && Math.sign(dv) !== Math.sign(G.v);
+  const rate = braking ? ST.decel : ST.accel;
+  G.v += clamp(dv, -rate * dt, rate * dt);
+  if (target != null && !keyDir && Math.abs(target - G.x) < 3 && Math.abs(G.v) < 30) G.v = 0;
+  G.x += G.v * dt;
+  if (G.x < w) { G.x = w; G.v = 0; }
+  if (G.x > W - w) { G.x = W - w; G.v = 0; }
+}
+
+function collectItems(h) {
+  for (let i = G.items.length - 1; i >= 0; i--) {
+    const it = G.items[i], dx = it.x - h.x, dy = it.y - h.y, rr = HR + it.t.r;
+    if (dx * dx + dy * dy < rr * rr) {
+      const mult = 1 + Math.min(4, Math.floor(G.streak / 5));
+      const gain = it.t.v * mult;
+      G.cash += gain;
+      floatText(it.x, it.y - 10, `+$${gain}`, '#7dffa0');
+      burst(it.x, it.y, 10, ['#ffe27a', '#fff', '#7dffa0'], 200, .5);
+      sfx.coin();
+      G.items.splice(i, 1);
+    }
+  }
+}
+
+function update(dt) {
+  G.time += dt;
+  // shared tweens
+  for (const s of ['L', 'R']) {
+    const goal = s === G.closed ? 0 : 1;
+    G.lid[s] += (goal - G.lid[s]) * Math.min(1, dt * 11);
+  }
+  G.slam = Math.max(0, G.slam - dt);
+  G.shake = Math.max(0, G.shake - dt * 3);
+
+  // items drift
+  for (const it of G.items) {
+    it.age += dt; it.x += it.vx * dt;
+    if (it.x < 30 || it.x > W - 30) { it.vx = -it.vx; it.x = clamp(it.x, 30, W - 30); }
+    it.y = it.y0 + Math.sin(it.age * it.bobF + it.ph) * it.bobA;
+  }
+  if (G.phase !== 'over' && G.items.length < 8) {
+    G.spawnT -= dt;
+    if (G.spawnT <= 0) { G.items.push(newItem()); G.spawnT = rand(.4, 1.1); }
+  }
+
+  // particles / floaters
+  for (let i = G.parts.length - 1; i >= 0; i--) {
+    const p = G.parts[i]; p.life -= dt; if (p.life <= 0) { G.parts.splice(i, 1); continue; }
+    p.vy += 600 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+  for (let i = G.floats.length - 1; i >= 0; i--) {
+    const f = G.floats[i]; f.life -= dt * 1.1; f.y -= 40 * dt; if (f.life <= 0) G.floats.splice(i, 1);
+  }
+  for (let i = G.splats.length - 1; i >= 0; i--) {
+    const s = G.splats[i]; s.t += dt; if (s.t > 3) G.splats.splice(i, 1);
+  }
+
+  if (G.phase === 'jump' || G.phase === 'fly') steer(dt);
+
+  if (G.phase === 'jump') {
+    G.jumpT += dt / .42;
+    if (G.jumpT >= 1) {                       // jumper lands on the open flap -> launch the hidden hobo
+      launch(.3);
+      G.inside = G.jumper;
+      swapFlaps();
+      sfx.slam(); G.shake = .25;
+      G.phase = 'fly';
+    }
+  } else if (G.phase === 'fly') {
+    updateAir(dt);
+  } else if (G.phase === 'dead') {
+    G.overT -= dt; if (G.overT <= 0) endRun();
+  }
+}
+
+function updateAir(dt) {
+  const a = G.air; a.t += dt;
+  const prevBottom = a.y + HR;
+  a.vy += GRAV * dt; a.x += a.vx * dt; a.y += a.vy * dt;
+  if (a.x < HR) { a.x = HR; a.vx = Math.abs(a.vx); }
+  if (a.x > W - HR) { a.x = W - HR; a.vx = -Math.abs(a.vx); }
+  if (!a.bonked) collectItems(a);
+
+  const bottom = a.y + HR, level = DTOP - 6;
+  const over = a.x > G.x - DW / 2 - 6 && a.x < G.x + DW / 2 + 6;
+  if (!a.bonked && a.vy > 0 && over && bottom >= level && prevBottom <= level + 6) {
+    const side = a.x < G.x ? 'L' : 'R';
+    if (side !== G.closed) {                      // open flap: caught!
+      const edge = clamp(Math.abs(a.x - G.x) / (DW / 2), 0, 1);
+      G.streak++; G.catches++; G.bestStreak = Math.max(G.bestStreak, G.streak);
+      const mult = 1 + Math.min(4, Math.floor(G.streak / 5));
+      G.cash += mult; floatText(a.x, DTOP - 40, `+$${mult}`, '#ffe27a');
+      burst(a.x, DTOP - 6, 10, ['#fff', '#ffe27a'], 160, .4);
+      const who = a.who;
+      launch(edge);                               // hidden hobo bursts out of the closed flap
+      G.inside = who;                             // the one who landed is now inside
+      swapFlaps();
+      G.lid[opp(G.closed)] = Math.max(G.lid[opp(G.closed)], .6);
+      sfx.slam(); G.shake = .3;
+      return;
+    } else {                                      // closed flap: bonk
+      a.bonked = true;
+      a.vy = -260; a.vx = (a.x < G.x ? -1 : 1) * 280;
+      floatText(a.x, DTOP - 40, 'BONK!', '#ff9a7a'); sfx.slam();
+    }
+  }
+  if (a.y + HR >= GROUND) splat(a);
+}
+
+function splat(a) {
+  G.splats.push({ x: a.x, t: 0, who: a.who });
+  burst(a.x, GROUND - 6, 22, ['#ffe27a', '#fff', '#ff9a7a', '#8fd0ff'], 320, .8);
+  G.shake = 1; sfx.splat();
+  G.deadWho = a.who; G.air = null;
+  G.phase = 'dead'; G.overT = 1.5;
+}
+
+function endRun() {
+  G.phase = 'over';
+  S.cash += G.cash;
+  const newBest = G.cash > S.best;
+  if (newBest) S.best = G.cash;
+  save();
+  showMenu({ cash: G.cash, catches: G.catches, streak: G.bestStreak, who: HOBOS[G.deadWho].name, newBest });
+}
+
+/* ------------------------------------------------------------------ hobo sprite */
+function rr(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+function limb(c, x0, y0, ang, len, col, wid, endCol) {
+  const x1 = x0 + Math.sin(ang) * len, y1 = y0 + Math.cos(ang) * len;
+  c.strokeStyle = col; c.lineWidth = wid; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+  c.fillStyle = endCol; c.beginPath(); c.arc(x1, y1, wid * .62, 0, 7); c.fill();
+}
+/* mode: 'fly' = flailing arms and legs, 'stand' = idle on the flap. Same animation for every hobo, palette swapped. */
+function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3) {
+  const c = ctx, fly = mode === 'fly';
+  c.save(); c.translate(x, y); c.rotate(rot); c.scale(sc, sc);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  const s1 = fly ? Math.sin(tt * 17) : Math.sin(tt * 3) * .12;
+  const s2 = fly ? Math.sin(tt * 17 + 1.9) : Math.sin(tt * 3 + 1.2) * .12;
+  // legs
+  limb(c, -4, 8, (fly ? .45 : .1) + s1 * .75, 13, pal.pants, 5.5, pal.shoe);
+  limb(c,  4, 8, -(fly ? .45 : .1) + s2 * .75, 13, pal.pants, 5.5, pal.shoe);
+  // arms (behind body)
+  const armBase = fly ? Math.PI : 0;
+  limb(c, -8, -4, armBase + (fly ? -.5 : .22) + s2 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
+  limb(c,  8, -4, armBase + (fly ? .5 : -.22) + s1 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
+  // coat
+  c.fillStyle = pal.coat; rr(c, -9.5, -8, 19, 18, 5); c.fill();
+  c.fillStyle = pal.coat2; c.fillRect(-1, -8, 2, 18);
+  c.fillStyle = pal.patch; rr(c, 2.5, 1, 5.5, 5.5, 1.2); c.fill();
+  c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = .8; c.setLineDash([1.2, 1.2]); rr(c, 2.5, 1, 5.5, 5.5, 1.2); c.stroke(); c.setLineDash([]);
+  // head
+  c.fillStyle = pal.skin; c.beginPath(); c.arc(0, -15, 7.6, 0, 7); c.fill();
+  c.fillStyle = 'rgba(40,28,22,.5)'; c.beginPath(); c.arc(0, -15, 7.6, .35, Math.PI - .35); c.fill();
+  // face
+  if (fly) {
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(-3, -16.5, 2.3, 0, 7); c.arc(3, -16.5, 2.3, 0, 7); c.fill();
+    c.fillStyle = '#111'; c.beginPath(); c.arc(-3, -16.2, 1.1, 0, 7); c.arc(3, -16.2, 1.1, 0, 7); c.fill();
+    c.fillStyle = '#4a1010'; c.beginPath(); c.ellipse(0, -11.2, 2.4, 2.9 + Math.sin(tt * 17) * .5, 0, 0, 7); c.fill();
+  } else {
+    c.fillStyle = '#111'; c.beginPath(); c.arc(-3, -16, 1.1, 0, 7); c.arc(3, -16, 1.1, 0, 7); c.fill();
+    c.strokeStyle = '#4a1010'; c.lineWidth = 1; c.beginPath(); c.arc(0, -13, 2.4, .2, Math.PI - .2); c.stroke();
+  }
+  // beanie
+  c.fillStyle = pal.hat; c.beginPath(); c.arc(0, -17.5, 8.1, Math.PI, 0); c.fill();
+  c.fillStyle = pal.hat2; rr(c, -8.4, -19, 16.8, 4, 1.6); c.fill();
+  c.fillStyle = pal.hat2; c.beginPath(); c.arc(0, -26, 2.6, 0, 7); c.fill();
+  c.restore();
+}
+
+/* ------------------------------------------------------------------ drawing */
+function drawDumpster() {
+  const x = G.x, w = DW, bounce = G.slam > 0 ? Math.sin(G.slam * 40) * 2 : 0;
+  ctx.save(); ctx.translate(0, bounce);
+  // wheels
+  ctx.fillStyle = '#16161e';
+  for (const dx of [-w / 2 + 16, w / 2 - 16]) { ctx.beginPath(); ctx.arc(x + dx, DTOP + 70, 8, 0, 7); ctx.fill(); }
+  // body
+  ctx.fillStyle = '#2e7d4f'; ctx.beginPath();
+  ctx.moveTo(x - w / 2, DTOP); ctx.lineTo(x + w / 2, DTOP); ctx.lineTo(x + w / 2 - 9, DTOP + 66); ctx.lineTo(x - w / 2 + 9, DTOP + 66); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,.2)';
+  for (let i = 1; i < 5; i++) ctx.fillRect(x - w / 2 + i * (w / 5) - 1.5, DTOP + 6, 3, 56);
+  ctx.fillStyle = '#245f3c'; ctx.fillRect(x - w / 2 + 5, DTOP + 22, w - 10, 4);
+  ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(x - w / 2, DTOP, w, 3);
+  // grime + sticker
+  ctx.fillStyle = 'rgba(255,255,255,.14)'; rr(ctx, x - 16, DTOP + 34, 32, 18, 3); ctx.fill();
+  ctx.fillStyle = '#2a2a33'; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('NO DIVING', x, DTOP + 46);
+  // the dark gap under the closed flap + two eyes peeking out
+  const cx = flapX(G.closed);
+  ctx.fillStyle = '#0b0d10'; ctx.fillRect(cx - FLAP / 2 + 4, DTOP + 4, FLAP - 8, 15);
+  if (G.phase !== 'over' && G.phase !== 'dead' || G.phase === 'dead') {
+    const blink = (Math.floor(G.time * 2.2) % 9 === 0) ? 0 : 1;
+    ctx.fillStyle = '#fff';
+    for (const dx of [-9, 9]) { ctx.beginPath(); ctx.ellipse(cx + dx, DTOP + 11, 4, 4.6 * blink + .6, 0, 0, 7); ctx.fill(); }
+    ctx.fillStyle = '#111';
+    for (const dx of [-9, 9]) { ctx.beginPath(); ctx.arc(cx + dx + clamp((G.air ? G.air.x - cx : 0) / 60, -1.5, 1.5), DTOP + 11, 1.8, 0, 7); ctx.fill(); }
+  }
+  ctx.restore();
+}
+function drawFlaps() {
+  const w = DW, bounce = G.slam > 0 ? Math.sin(G.slam * 40) * 2 : 0;
+  for (const side of ['L', 'R']) {
+    const a = G.lid[side], dir = side === 'L' ? 1 : -1;
+    const hx = side === 'L' ? G.x - w / 2 : G.x + w / 2;
+    ctx.save(); ctx.translate(hx, DTOP - 3 + bounce); ctx.rotate(-dir * a * 1.95);
+    const x0 = dir === 1 ? 0 : -FLAP;
+    ctx.fillStyle = '#1d5a37'; rr(ctx, x0, -8, FLAP, 9, 2.5); ctx.fill();
+    ctx.fillStyle = '#3aa06a'; ctx.fillRect(x0 + 2, -8, FLAP - 4, 3);
+    ctx.fillStyle = '#10301f'; ctx.beginPath(); ctx.arc(x0 + (dir === 1 ? FLAP - 8 : 8), -3.5, 2.3, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+}
+function drawJump() {
+  // J leaps from the closed flap to the open flap
+  const u = clamp(G.jumpT, 0, 1);
+  const from = flapX(G.closed), to = flapX(opp(G.closed));
+  const x = lerp(from, to, u), y = DTOP - 22 - Math.sin(Math.PI * u) * 80;
+  drawHobo(x, y, (to > from ? 1 : -1) * Math.sin(Math.PI * u) * .5, G.time, HOBOS[G.jumper].pal, 'fly');
+}
+function drawScene() {
+  ctx.drawImage(bg, 0, 0, W, H);
+  // items
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const it of G.items) { ctx.font = `${it.t.r * 2}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.fillText(it.t.e, it.x, it.y); }
+  ctx.textBaseline = 'alphabetic';
+  // splats
+  for (const s of G.splats) {
+    const k = Math.min(1, s.t * 6), fade = clamp(1 - (s.t - 2) , 0, 1);
+    ctx.save(); ctx.globalAlpha = fade; ctx.translate(s.x, GROUND - 3);
+    ctx.fillStyle = HOBOS[s.who].pal.coat; ctx.beginPath(); ctx.ellipse(0, 0, 30 * k, 7 * k, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = HOBOS[s.who].pal.skin; ctx.beginPath(); ctx.arc(-6 * k, -2, 6 * k, 0, 7); ctx.fill();
+    ctx.strokeStyle = HOBOS[s.who].pal.pants; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-24 * k, 0); ctx.lineTo(-38 * k, 3); ctx.moveTo(24 * k, 0); ctx.lineTo(40 * k, -1); ctx.stroke();
+    // dizzy stars
+    ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
+    for (let i = 0; i < 3; i++) { const an = s.t * 5 + i * 2.1; ctx.fillText('★', Math.cos(an) * 22, -22 + Math.sin(an) * 6); }
+    ctx.font = '900 26px system-ui'; ctx.lineWidth = 5; ctx.strokeStyle = '#3a0d00'; ctx.fillStyle = '#ffcf4a';
+    const ty = -48 - Math.min(s.t, .6) * 30; ctx.strokeText('SPLAT!', 0, ty); ctx.fillText('SPLAT!', 0, ty);
+    ctx.restore();
+  }
+  drawDumpster();
+  // standing jumper (ready phase)
+  if (G.phase === 'ready') {
+    const bob = Math.sin(G.time * 3) * 1.2;
+    drawHobo(flapX(G.closed), DTOP - 28 + bob, 0, G.time, HOBOS[G.jumper].pal, 'stand');
+  } else if (G.phase === 'jump') drawJump();
+  drawFlaps();
+  // flying hobo
+  if (G.air) {
+    const a = G.air, rot = Math.sin(a.t * 6 + a.who) * .35 + clamp(a.vx / 700, -.5, .5);
+    drawHobo(a.x, a.y, rot, a.t + a.who, HOBOS[a.who].pal, 'fly');
+  }
+  // particles
+  for (const p of G.parts) { ctx.globalAlpha = clamp(p.life / p.max, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s); }
+  ctx.globalAlpha = 1;
+  // floaters
+  ctx.textAlign = 'center'; ctx.font = '900 22px system-ui'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.7)';
+  for (const f of G.floats) { ctx.globalAlpha = clamp(f.life, 0, 1); ctx.strokeText(f.txt, f.x, f.y); ctx.fillStyle = f.col; ctx.fillText(f.txt, f.x, f.y); }
+  ctx.globalAlpha = 1;
+}
+function hudText(txt, x, y, size, col, align = 'left') {
+  ctx.font = `900 ${size}px system-ui`; ctx.textAlign = align; ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.75)';
+  ctx.strokeText(txt, x, y); ctx.fillStyle = col; ctx.fillText(txt, x, y);
+}
+function drawHud() {
+  hudText(`$${G.cash}`, 16, 40, 34, '#7dffa0');
+  if (G.phase === 'fly' || G.phase === 'dead') {
+    const mult = 1 + Math.min(4, Math.floor(G.streak / 5));
+    hudText(`${G.streak} bounce${G.streak === 1 ? '' : 's'}${mult > 1 ? `  ×${mult}` : ''}`, W / 2, 36, 24, '#ffe27a', 'center');
+  }
+  if (G.phase === 'ready' && !menuOpen) {
+    const blink = .6 + Math.sin(G.time * 5) * .4;
+    ctx.globalAlpha = blink;
+    hudText('TAP · CLICK · PRESS ← →', W / 2, 150, 30, '#fff', 'center');
+    ctx.globalAlpha = .85;
+    hudText('then steer — the dumpster chases your cursor or finger', W / 2, 184, 17, '#ffe27a', 'center');
+    ctx.globalAlpha = 1;
+  }
+  if (paused && !menuOpen) {
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, W, H);
+    hudText('PAUSED', W / 2, H / 2 - 6, 54, '#fff', 'center');
+    hudText('tap, click or press a key to keep diving', W / 2, H / 2 + 34, 20, '#ffe27a', 'center');
+  }
+}
+
+/* ------------------------------------------------------------------ menu / shop (DOM) */
+const overlay = document.getElementById('overlay'), card = document.getElementById('card');
+function pips(lv) { return '●'.repeat(lv) + '○'.repeat(MAX_LV - lv); }
+let lastResult = null;
+function showMenu(res) {
+  lastResult = res;
+  menuOpen = true; overlay.classList.remove('hidden');
+  const first = !res;
+  card.innerHTML = `
+    <h1>DUMPSTER DIVERS</h1>
+    <p class="sub">${first ? 'Gutter Gary &amp; Dumpy Dave want that trash. Bounce them. Grab stuff. Don’t hit the pavement.' : 'Another one bites the asphalt.'}</p>
+    ${res ? `<div class="result"><b>${res.who}</b> got flattened.<br>
+      Earned <b>$${res.cash}</b> · ${res.catches} bounce${res.catches === 1 ? '' : 's'} · best streak ${res.streak}${res.newBest ? ' · <b>NEW RECORD!</b>' : ''}</div>` : ''}
+    <div class="cash">Stash: <span>$${S.cash}</span></div>
+    ${UPGRADES.map(u => {
+      const lv = S[u.id], maxed = lv >= MAX_LV, cost = costOf(u);
+      return `<div class="row"><div class="nm"><b>${u.name}</b><small>${u.desc}</small><div class="pips">${pips(lv)}</div></div>
+        <button data-buy="${u.id}" ${maxed || S.cash < cost ? 'disabled' : ''}>${maxed ? 'MAX' : '$' + cost}</button></div>`;
+    }).join('')}
+    <button class="go" id="go">${first ? 'DIVE IN' : 'TRY AGAIN'}</button>
+    <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>The dumpster starts slow — that’s what the upgrades are for.<br>Best haul: $${S.best}</div>
+    <button class="reset" id="reset">reset progress</button>`;
+}
+card.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  audio();
+  if (b.id === 'go') { startRun(); return; }
+  if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, best: 0, muted: S.muted }; save(); showMenu(null); } return; }
+  const id = b.dataset.buy; if (!id) return;
+  const u = UPGRADES.find(x => x.id === id), cost = costOf(u);
+  if (S[id] < MAX_LV && S.cash >= cost) {
+    S.cash -= cost; S[id]++; save(); sfx.coin();
+    const st = card.scrollTop; showMenu(lastResult); card.scrollTop = st;
+  }
+});
+
+function startRun() {
+  audio();
+  G = newRun(); paused = false; target = null; keyDir = 0; keys.left = keys.right = false;
+  menuOpen = false; overlay.classList.add('hidden');
+}
+
+/* ------------------------------------------------------------------ main loop */
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.033, (now - last) / 1000); last = now;
+  if (G) {
+    if (!menuOpen && !paused) update(dt);
+    else if (menuOpen) { G.time += dt; for (const it of G.items) { it.age += dt; it.y = it.y0 + Math.sin(it.age * it.bobF + it.ph) * it.bobA; } for (const s of ['L','R']) G.lid[s] += ((s === G.closed ? 0 : 1) - G.lid[s]) * Math.min(1, dt * 11); G.splats.length = 0; }
+    const sc = cv.width / W;
+    ctx.setTransform(sc, 0, 0, sc, 0, 0);
+    ctx.save();
+    if (G.shake > 0) ctx.translate(rand(-1, 1) * G.shake * 6, rand(-1, 1) * G.shake * 6);
+    drawScene();
+    ctx.restore();
+    drawHud();
+  }
+  requestAnimationFrame(frame);
+}
+
+G = newRun();
+showMenu(null);
+requestAnimationFrame(frame);
+
+// tiny hook so the game can be driven from automated tests
+window.__dd = { get G() { return G; }, get st() { return ST; }, S, startRun, update: dt => update(dt) };
+})();
+</script>
+</body>
+</html>
