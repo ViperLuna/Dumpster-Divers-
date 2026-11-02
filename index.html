@@ -43,17 +43,21 @@
   .hint { margin-top:.8em; opacity:.7; font-size:.82em; line-height:1.4; }
   .reset { margin-top:.6em; background:none; box-shadow:none; color:#99a; font-weight:500; font-size:.75em; padding:.2em; text-decoration:underline; }
   #title { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
-    background:linear-gradient(to bottom, #0b1036 0%, #0b1036 32%, #10112a 62%, #07080f 100%); }
+    justify-content:flex-start;
+    /* solid navy behind the art, fading out so the live alley (skyline + dumpster) shows underneath */
+    background:linear-gradient(to bottom, #0b1036 0%, #0b1036 31%, rgba(11,16,54,.55) 40%, rgba(11,16,54,0) 50%); }
   #title.hidden { display:none; }
+  #title .cta { position:absolute; left:0; right:0; top:55%; display:flex; flex-direction:column; align-items:center; }
   /* the whole image, uncropped; its top edge matches the background colour so there is no seam */
   #title .art { width:100%; aspect-ratio:1376/768;
-    -webkit-mask-image:linear-gradient(to bottom, #000 0, #000 84%, transparent 100%);
-            mask-image:linear-gradient(to bottom, #000 0, #000 84%, transparent 100%); }
+    -webkit-mask-image:linear-gradient(to bottom, #000 0, #000 72%, transparent 100%);
+            mask-image:linear-gradient(to bottom, #000 0, #000 72%, transparent 100%); }
   #title .art img { width:100%; height:100%; display:block; }
   #start { margin-top:1.4em; font-size:2em; padding:.5em 1.6em; background:#7dffa0; box-shadow:0 .2em 0 #2f8f4c; letter-spacing:.06em;
     animation:pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 50% { transform:scale(1.05); } }
-  #title .tip { margin-top:1.1em; color:var(--ink); opacity:.75; font-size:.9em; text-align:center; line-height:1.5; text-shadow:0 .1em .3em #000; }
+  #title .tip { margin-top:1.1em; color:var(--ink); font-size:.9em; text-align:center; line-height:1.5; text-shadow:0 .1em .3em #000;
+    background:rgba(5,6,14,.62); padding:.5em .9em; border-radius:.7em; }
   #mute { position:absolute; right:.6em; top:.6em; z-index:5; padding:.3em .55em; font-size:1.2em; background:rgba(0,0,0,.45);
     color:#fff; box-shadow:none; border-radius:.5em; }
 </style>
@@ -65,8 +69,10 @@
   <div id="overlay" class="hidden"><div class="card" id="card"></div></div>
   <div id="title">
     <div class="art"><img src="assets/title.jpg" alt="Dumpster Divers: a Viperbot game" draggable="false"></div>
-    <button id="start">START</button>
-    <div class="tip">Bounce the hobos, grab the junk, don’t hit the pavement.<br>Steer with your mouse, finger, or ← → keys.</div>
+    <div class="cta">
+      <button id="start">START</button>
+      <div class="tip">Bounce the hobos, grab the junk, don’t hit the pavement.<br>Steer with your mouse, finger, or ← → keys.</div>
+    </div>
   </div>
 </div>
 
