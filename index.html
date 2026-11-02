@@ -65,6 +65,7 @@ const GRAV = 1000;
 const HR = 15;                    // hobo collision radius
 const MAX_LV = 25;
 const CLONE_CAP = 6;
+const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
 const FLING = 4;                  // launch sideways speed per px landed off-centre
 
@@ -390,8 +391,9 @@ function spawnClones(h) {
   if (n <= 0) return false;
   for (let i = 0; i < n; i++) {
     const dir = (n === 1 ? (Math.random() < .5 ? -1 : 1) : (i === 0 ? -1 : 1));
-    G.clones.push({ x: h.x, y: h.y, vx: dir * rand(190, 260) + h.vx * .3, vy: h.vy * .7 + rand(-170, -20), t: 0, cd: 0,
-                    chute: null, pal: CLONE_PALS[G.cloneIdx++ % CLONE_PALS.length] });
+    // every clone shoots UP with a decent launch (about 70-95% of a normal launch), whatever the parent was doing
+    G.clones.push({ x: h.x, y: h.y, vx: dir * rand(150, 230) + h.vx * .2, vy: -ST.launch * rand(.7, .95), t: 0, cd: 0,
+                    gs: CLONE_GRAVITY, chute: null, pal: CLONE_PALS[G.cloneIdx++ % CLONE_PALS.length] });
   }
   burst(h.x, h.y, 14, ['#fff', '#ffe27a', '#ff9a7a'], 240, .5); sfx.clones();
   return true;
@@ -420,7 +422,7 @@ function applyPowerUp(id, h, isMain, ox, oy) {
 function physics(h, dt) {
   h.t += dt; h.cd = Math.max(0, h.cd - dt);
   if (h.chute === 'armed' && h.vy > 0) h.chute = 'open';
-  let g = GRAV;
+  let g = GRAV * (h.gs || 1);                       // clones float a little (gs < 1) so they last longer
   if (h.chute === 'open') g = GRAV * .22;
   h.vy += g * dt;
   if (h.chute === 'open') h.vy = Math.min(h.vy, 170);
