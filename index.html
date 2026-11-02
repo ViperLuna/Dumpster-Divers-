@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Dumpster Divers</title>
 <style>
-  :root { color-scheme: dark; --ink:#f4ead2; --accent:#ffcf4a; --panel:rgba(12,14,26,.88); }
+  :root { color-scheme: dark; --ink:#f4ead2; --accent:#ffcf4a; --panel:rgba(12,14,26,.9); }
   html, body { margin:0; height:100%; background:#07080f; overflow:hidden;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     touch-action:none; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
@@ -17,28 +17,31 @@
   #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     background:rgba(5,6,14,.62); overflow:auto; }
   #overlay.hidden { display:none; }
-  .card { background:var(--panel); border:.2em solid #3a3f66; border-radius:1em; padding:1.4em 1.8em;
+  .card { background:var(--panel); border:.2em solid #3a3f66; border-radius:1em; padding:1.3em 1.5em;
     width:min(30em, 94%); max-height:96%; overflow:auto; box-sizing:border-box; color:var(--ink);
     text-align:center; box-shadow:0 1em 3em rgba(0,0,0,.6); }
   h1 { margin:0 0 .15em; font-size:2.2em; letter-spacing:.04em; color:var(--accent);
     text-shadow:.07em .07em 0 #7a3b00, 0 0 .6em rgba(255,207,74,.35); }
-  .sub { margin:0 0 1em; opacity:.8; font-size:1em; }
-  .result { margin:.2em 0 1em; padding:.7em .9em; background:rgba(255,255,255,.07); border-radius:.6em; line-height:1.45; }
+  .sub { margin:0 0 .9em; opacity:.8; font-size:1em; }
+  .result { margin:.2em 0 .9em; padding:.7em .9em; background:rgba(255,255,255,.07); border-radius:.6em; line-height:1.45; }
   .result b { color:var(--accent); }
-  .cash { font-size:1.5em; font-weight:800; margin:.3em 0 .6em; }
+  .cash { font-size:1.5em; font-weight:800; margin:.3em 0 .5em; }
   .cash span { color:#7dffa0; }
-  .row { display:flex; align-items:center; gap:.9em; text-align:left; padding:.7em .8em; margin:.5em 0;
+  .row { display:flex; align-items:center; gap:.8em; text-align:left; padding:.6em .7em; margin:.45em 0;
     background:rgba(255,255,255,.06); border-radius:.7em; }
-  .row .nm { flex:1; } .row .nm b { display:block; font-size:1.15em; }
-  .row .nm small { opacity:.7; font-size:.85em; } .pips { letter-spacing:.12em; font-size:.8em; color:var(--accent); margin-top:.2em; }
+  .row .nm { flex:1; } .row .nm b { display:block; font-size:1.1em; }
+  .row .nm small { opacity:.7; font-size:.82em; display:block; }
+  .bar { height:.5em; background:rgba(255,255,255,.12); border-radius:.3em; margin-top:.4em; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--accent); }
+  .lv { font-size:.8em; opacity:.85; margin-top:.25em; }
   button { font:inherit; cursor:pointer; border:0; border-radius:.6em; padding:.6em 1em; font-weight:800; color:#1b1200;
     background:var(--accent); box-shadow:0 .2em 0 #a56a00; }
   button:active { transform:translateY(.15em); box-shadow:0 .05em 0 #a56a00; }
   button:disabled { background:#555a70; color:#aab; box-shadow:none; cursor:not-allowed; }
-  .row button { min-width:5.5em; }
-  .go { display:block; width:100%; margin-top:1em; font-size:1.5em; padding:.55em; background:#7dffa0; box-shadow:0 .2em 0 #2f8f4c; }
-  .hint { margin-top:.9em; opacity:.7; font-size:.85em; line-height:1.4; }
-  .reset { margin-top:.7em; background:none; box-shadow:none; color:#99a; font-weight:500; font-size:.75em; padding:.2em; text-decoration:underline; }
+  .row button { min-width:4.8em; }
+  .go { display:block; width:100%; margin-top:.9em; font-size:1.5em; padding:.55em; background:#7dffa0; box-shadow:0 .2em 0 #2f8f4c; }
+  .hint { margin-top:.8em; opacity:.7; font-size:.82em; line-height:1.4; }
+  .reset { margin-top:.6em; background:none; box-shadow:none; color:#99a; font-weight:500; font-size:.75em; padding:.2em; text-decoration:underline; }
   #mute { position:absolute; right:.6em; top:.6em; z-index:5; padding:.3em .55em; font-size:1.2em; background:rgba(0,0,0,.45);
     color:#fff; box-shadow:none; border-radius:.5em; }
 </style>
@@ -54,50 +57,60 @@
 (() => {
 'use strict';
 
-/* ------------------------------------------------------------------ constants */
-const W = 450, H = 800;        // tall + narrow playfield, same on every device
-const DTOP = 670;              // top of the dumpster body (flaps sit on this line)
+/* ============================================================== constants */
+const W = 450, H = 800;           // tall + narrow playfield, same on every device
+const DTOP = 670;                 // world y of the dumpster rim (the world scrolls UP from here)
 const GROUND = 756;
-const ITEM_COUNT = 9;
 const GRAV = 1000;
-const DW = 112;                // dumpster width
-const FLAP = DW / 2;
-const HR = 15;                 // hobo collision radius
-const MAX_LV = 8;
+const HR = 15;                    // hobo collision radius
+const MAX_LV = 25;
+const CLONE_CAP = 6;
+const PU_TIME = 10;               // seconds for timed power-ups
+const FLING = 4;                  // launch sideways speed per px landed off-centre
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
 const lerp = (a, b, t) => a + (b - a) * t;
 const opp = s => (s === 'L' ? 'R' : 'L');
+const wrapX = x => ((x % W) + W) % W;
+const wd = (a, b) => { let d = (a - b) % W; if (d > W / 2) d -= W; if (d < -W / 2) d += W; return d; }; // shortest signed a-b on the ring
 
 const HOBOS = [
   { name: 'Gutter Gary', pal: { coat:'#4c9a47', coat2:'#2f6b2f', hat:'#2f6b2f', hat2:'#7bd36f', pants:'#6b5a3a', shoe:'#2a2118', skin:'#e2b58c', patch:'#e8d36a' } },
   { name: 'Dumpy Dave',  pal: { coat:'#c8483a', coat2:'#8c2c22', hat:'#e8b923', hat2:'#fff1a8', pants:'#34518a', shoe:'#1c1c26', skin:'#b9835a', patch:'#6fb0e0' } },
 ];
+const CLONE_PALS = [
+  { coat:'#7b52c9', coat2:'#523591', hat:'#f08ad0', hat2:'#ffd1ef', pants:'#3a3a52', shoe:'#1c1c26', skin:'#e2b58c', patch:'#ffe27a' },
+  { coat:'#e08a2c', coat2:'#a35d14', hat:'#2c6fb5', hat2:'#9ccbff', pants:'#55483a', shoe:'#201a14', skin:'#c4916a', patch:'#7dffa0' },
+  { coat:'#2c9aa8', coat2:'#1b6670', hat:'#c8483a', hat2:'#ffb3a8', pants:'#2e3d57', shoe:'#14161e', skin:'#a8714a', patch:'#fff' },
+  { coat:'#d65a8f', coat2:'#9a3563', hat:'#3a3a52', hat2:'#9a9ab8', pants:'#4a6b3a', shoe:'#1c1c26', skin:'#efc9a4', patch:'#ffe27a' },
+];
 
-/* ------------------------------------------------------------------ save data */
-const SAVE_KEY = 'dumpsterDivers.v2';
-let S = { cash: 0, speed: 0, height: 0, best: 0, muted: false };
+/* ============================================================== save data */
+const SAVE_KEY = 'dumpsterDivers.v3';
+let S = { cash: 0, speed: 0, height: 0, hole: 0, bestCash: 0, bestAlt: 0, muted: false };
 try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) {}
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
 
+// Upgrades are deliberately small per level: you feel them after a few, not after one.
 const UPGRADES = [
-  { id: 'speed',  name: 'Dumpster Speed',  desc: 'Gets moving sooner and goes faster', base: 10, grow: 1.7 },
-  { id: 'height', name: 'Launch Height',   desc: 'Hobos fly higher, reach pricier junk', base: 12, grow: 1.7 },
+  { id: 'speed',  name: 'Dumpster Speed', desc: 'Gets moving sooner and goes a bit faster', base: 8,  grow: 1.24, pct: 4.5 },
+  { id: 'height', name: 'Launch Height',  desc: 'Hobos fly higher, into better junk',      base: 10, grow: 1.24, pct: 3.75 },
+  { id: 'hole',   name: 'Bigger Hole',    desc: 'Easier to land in, but edge landings fling wilder', base: 12, grow: 1.24, pct: 1.6 },
 ];
 const costOf = u => Math.round(u.base * Math.pow(u.grow, S[u.id]));
 
 function stats() {
   return {
-    accel:  150 + S.speed * 90,
-    maxV:   140 + S.speed * 40,
-    decel: (150 + S.speed * 90) * 1.35,
-    launch: 640 + S.height * 54,
+    accel:  150 * (1 + .045 * S.speed),
+    maxV:   140 * (1 + .03 * S.speed),
+    decel: 150 * (1 + .045 * S.speed) * 1.35,
+    launch: 640 + 24 * S.height,       // launch speed in px/s; height is decided ONLY by this
+    hole:   112 + 1.8 * S.hole,        // dumpster width (each flap/hole is half of it)
   };
 }
-const MAX_LAUNCH = Math.sqrt(2 * GRAV * (DTOP - HR - 60));   // keep the apex on screen
 
-/* ------------------------------------------------------------------ canvas setup */
+/* ============================================================== canvas */
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
 function resize() {
@@ -107,22 +120,22 @@ function resize() {
 }
 window.addEventListener('resize', resize); resize();
 
-/* ------------------------------------------------------------------ background (pre-rendered) */
+/* ---- background: the alley (pre-rendered), a space gradient above it, and parallax stars */
 const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
+const stars = document.createElement('canvas'); stars.width = W; stars.height = H;
 (function paintBackground() {
-  const c = bg.getContext('2d'); c.scale(2, 2);
   let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const c = bg.getContext('2d'); c.scale(2, 2);
   const WALL = GROUND - 136;
   const sky = c.createLinearGradient(0, 0, 0, WALL);
   sky.addColorStop(0, '#0b0e2c'); sky.addColorStop(.6, '#3a2459'); sky.addColorStop(1, '#a5506a');
   c.fillStyle = sky; c.fillRect(0, 0, W, H);
-  for (let i = 0; i < 80; i++) { c.fillStyle = `rgba(255,255,255,${.25 + rnd() * .6})`; c.fillRect(rnd() * W, rnd() * 420, 1.6, 1.6); }
+  for (let i = 0; i < 70; i++) { c.fillStyle = `rgba(255,255,255,${.25 + rnd() * .6})`; c.fillRect(rnd() * W, rnd() * 420, 1.6, 1.6); }
   const moon = c.createRadialGradient(350, 110, 8, 350, 110, 80);
   moon.addColorStop(0, 'rgba(255,248,214,.95)'); moon.addColorStop(.35, 'rgba(255,248,214,.25)'); moon.addColorStop(1, 'rgba(255,248,214,0)');
   c.fillStyle = moon; c.fillRect(250, 10, 200, 200);
   c.fillStyle = '#fff6d2'; c.beginPath(); c.arc(350, 110, 24, 0, 7); c.fill();
-  // skyline (two layers for depth)
-  for (const [col, lo, hi, alpha] of [['#1d1a3d', 130, 330, 1], ['#15162e', 90, 260, 1]]) {
+  for (const [col, lo, hi] of [['#1d1a3d', 130, 330], ['#15162e', 90, 260]]) {
     for (let x = -10; x < W; ) {
       const bw = 34 + rnd() * 40, bh = lo + rnd() * (hi - lo);
       c.fillStyle = col; c.fillRect(x, WALL + 10 - bh, bw, bh + 60);
@@ -131,7 +144,6 @@ const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2
       x += bw + 2;
     }
   }
-  // brick wall
   c.fillStyle = '#4a3038'; c.fillRect(0, WALL, W, GROUND - WALL);
   c.strokeStyle = 'rgba(0,0,0,.28)'; c.lineWidth = 1;
   for (let y = WALL, row = 0; y < GROUND; y += 14, row++) {
@@ -141,14 +153,19 @@ const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2
   const fade = c.createLinearGradient(0, WALL, 0, GROUND);
   fade.addColorStop(0, 'rgba(0,0,0,.35)'); fade.addColorStop(1, 'rgba(0,0,0,0)');
   c.fillStyle = fade; c.fillRect(0, WALL, W, GROUND - WALL);
-  // ground
   c.fillStyle = '#23242e'; c.fillRect(0, GROUND, W, H - GROUND);
   c.fillStyle = '#34364a'; c.fillRect(0, GROUND, W, 4);
   c.fillStyle = 'rgba(255,255,255,.07)';
   for (let i = 0; i < 30; i++) c.fillRect(rnd() * W, GROUND + 8 + rnd() * 30, 3 + rnd() * 8, 1.5);
+  const s = stars.getContext('2d');
+  for (let i = 0; i < 90; i++) { s.fillStyle = `rgba(255,255,255,${.3 + rnd() * .7})`; const z = rnd() < .2 ? 2.2 : 1.4; s.fillRect(rnd() * W, rnd() * H, z, z); }
 })();
 
-/* ------------------------------------------------------------------ audio (tiny synth) */
+/* ============================================================== audio */
+// Every game event has a named sound hook. Right now they are tiny synth beeps. To use a real sound
+// file, set e.g.  SOUNDS.splat = 'sounds/splat.mp3'  and that file plays instead.
+const SOUNDS = {};
+const _audioCache = {};
 let ac = null;
 function audio() {
   if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
@@ -162,78 +179,131 @@ function tone(f, d, type = 'square', vol = .06, slide = 0, delay = 0) {
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
   o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + d + .03);
 }
-const sfx = {
-  launch() { tone(200, .28, 'square', .07, 520); },
-  jump()   { tone(300, .15, 'square', .05, 300); },
-  coin()   { tone(880, .08, 'square', .05); tone(1320, .12, 'square', .05, 0, .07); },
-  slam()   { tone(110, .14, 'triangle', .12, -50); },
-  splat()  { tone(170, .4, 'sawtooth', .1, -140); tone(90, .3, 'square', .08, -40, .05); },
+function playFile(name) {
+  const url = SOUNDS[name]; if (!url || S.muted) return false;
+  try { const a = (_audioCache[name] || (_audioCache[name] = new Audio(url))).cloneNode(); a.volume = .8; a.play().catch(() => {}); return true; }
+  catch (e) { return false; }
+}
+const synth = {
+  launch()     { tone(200, .28, 'square', .07, 520); },
+  jump()       { tone(300, .15, 'square', .05, 300); },
+  coin()       { tone(880, .08, 'square', .045); tone(1320, .12, 'square', .045, 0, .07); },
+  coinRare()   { tone(660, .1, 'triangle', .07); tone(990, .1, 'triangle', .07, 0, .08); tone(1480, .22, 'triangle', .07, 0, .16); },
+  slam()       { tone(110, .14, 'triangle', .12, -50); },
+  bonk()       { tone(140, .16, 'square', .09, -60); },
+  splat()      { tone(170, .4, 'sawtooth', .1, -140); tone(90, .3, 'square', .08, -40, .05); },
+  cloneSplat() { tone(300, .18, 'sawtooth', .05, -200); },
+  powerup()    { tone(520, .1, 'square', .06); tone(780, .1, 'square', .06, 0, .08); tone(1040, .2, 'square', .06, 0, .16); },
+  dup()        { tone(700, .08, 'triangle', .06); tone(900, .1, 'triangle', .06, 0, .06); },
+  hazard()     { tone(240, .2, 'sawtooth', .08, -120); },
+  boost()      { tone(300, .3, 'sawtooth', .07, 700); },
+  net()        { tone(220, .22, 'triangle', .1, 380); },
+  clones()     { tone(400, .12, 'square', .06); tone(600, .12, 'square', .06, 0, .1); tone(800, .12, 'square', .06, 0, .2); },
+  chute()      { tone(500, .3, 'sine', .07, -250); },
 };
+const sfx = {};
+for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](); };
 const muteBtn = document.getElementById('mute');
 function paintMute() { muteBtn.textContent = S.muted ? '🔇' : '🔊'; }
 muteBtn.addEventListener('click', e => { e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio(); });
 paintMute();
 
-/* ------------------------------------------------------------------ items */
-const ITEM_TYPES = [
-  { e: '🥫', v: 1,  w: 38, r: 16 },
-  { e: '🍾', v: 2,  w: 26, r: 16 },
-  { e: '🛍️', v: 3,  w: 16, r: 17 },
-  { e: '🐦', v: 5,  w: 12, r: 16, fast: true },
-  { e: '🍕', v: 10, w: 6,  r: 17 },
-  { e: '💰', v: 25, w: 2,  r: 18 },
+/* ============================================================== loot tables */
+// Each tier has an altitude window (px above the dumpster rim). Windows overlap, and every tier keeps a
+// small chance of showing up below its window, like a gacha.
+const TIERS = [
+  { lo: -200, hi: 650,  w: 100, glow: null },
+  { lo: 0,    hi: 950,  w: 45,  glow: null },
+  { lo: 280,  hi: 1450, w: 22,  glow: '#5ab8ff' },
+  { lo: 650,  hi: 2200, w: 9,   glow: '#b36bff' },
+  { lo: 1200, hi: 3800, w: 4,   glow: '#ffd23f' },
 ];
-function pickType() {
-  let tot = ITEM_TYPES.reduce((a, t) => a + t.w, 0), r = Math.random() * tot;
-  for (const t of ITEM_TYPES) { if ((r -= t.w) <= 0) return t; }
-  return ITEM_TYPES[0];
+const ITEMS = [
+  [ { e: '🥫', v: 1 }, { e: '🍾', v: 2 } ],
+  [ { e: '🛍️', v: 3 }, { e: '👟', v: 4 }, { e: '🧦', v: 3 } ],
+  [ { e: '🍕', v: 8 }, { e: '🍔', v: 9 }, { e: '🐦', v: 7, fast: true } ],
+  [ { e: '💰', v: 20 }, { e: '📺', v: 24 } ],
+  [ { e: '💎', v: 60 }, { e: '👑', v: 80 } ],
+];
+const PUS = [
+  { id: 'wide',   e: '↔️', w: 24 },
+  { id: 'net',    e: '🥅', w: 20 },
+  { id: 'saver',  e: '🛡️', w: 22 },
+  { id: 'multi',  e: '👥', w: 8 },
+  { id: 'chute',  e: '🪂', w: 20 },
+];
+const HAZ = [
+  [ { e: '🦅' }, { e: '🪁' } ],
+  [ { e: '🚁' }, { e: '✈️' } ],
+  [ { e: '🛸' }, { e: '☄️' } ],
+];
+function tierWeight(t, a) {
+  const T = TIERS[t];
+  let m;
+  if (a < T.lo) m = .08;
+  else if (a < T.lo + 150) m = .08 + .92 * (a - T.lo) / 150;
+  else if (a <= T.hi) m = 1;
+  else m = Math.max(0, 1 - (a - T.hi) / 350);
+  return T.w * m;
 }
-function newItem() {
-  const t = pickType(), ymin = 80, ymax = DTOP - 95;
-  const y0 = ymax - (ymax - ymin) * Math.pow(Math.random(), 1 / (1 + t.v * .08));
-  const sp = t.fast ? rand(40, 75) : rand(8, 24);
-  return { t, x: rand(40, W - 40), y0, y: y0, vx: (Math.random() < .5 ? -1 : 1) * sp,
-           ph: rand(0, 6.28), bobA: t.fast ? 10 : 5, bobF: rand(1.5, 3), age: 0 };
+function pickTier(a) {
+  const ws = TIERS.map((_, i) => tierWeight(i, a)), tot = ws.reduce((x, y) => x + y, 0);
+  let r = Math.random() * tot;
+  for (let i = 0; i < ws.length; i++) if ((r -= ws[i]) <= 0) return i;
+  return 0;
 }
+const pick = arr => arr[(Math.random() * arr.length) | 0];
 
-/* ------------------------------------------------------------------ run state */
+/* ============================================================== run state */
 let G = null, ST = stats();
 let menuOpen = true, paused = false;
+let lastResult = null;
 
 function newRun() {
   ST = stats();
   const jumper = Math.random() < .5 ? 0 : 1;
   const run = {
-    phase: 'ready',            // ready -> jump -> fly -> dead -> over
-    x: W / 2, v: 0,
+    phase: 'ready',                  // ready -> jump -> fly -> dead -> over
+    x: W / 2, v: 0, dw: ST.hole,
     closed: Math.random() < .5 ? 'L' : 'R',
-    lid: { L: 0, R: 0 },       // 0 = shut, 1 = wide open
-    jumper, inside: 1 - jumper,
-    jumpT: 0,
-    air: null,
-    cash: 0, streak: 0, bestStreak: 0, catches: 0,
-    items: [], spawnT: 0, parts: [], floats: [], splats: [],
-    shake: 0, time: 0, overT: 0, slam: 0, deadWho: 0,
+    lid: { L: 0, R: 0 },
+    jumper, inside: 1 - jumper, jumpT: 0,
+    air: null, clones: [], cloneIdx: 0,
+    objs: [], parts: [], floats: [], hudFloats: [], splats: [],
+    cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0,
+    wideT: 0, netT: 0, saver: false,
+    spawnT: 0, shake: 0, time: 0, overT: 0, slam: 0, deadWho: 0, camY: 0,
   };
   run.lid[run.closed] = 0; run.lid[opp(run.closed)] = 1;
-  for (let i = 0; i < ITEM_COUNT; i++) run.items.push(newItem());
+  G = run;
+  for (let i = 0; i < 9; i++) spawnObject(true);
   return run;
 }
-const flapX = (side) => G.x + (side === 'L' ? -FLAP / 2 : FLAP / 2);
+const flap = () => G.dw / 2;
+const flapCenter = side => G.x + (side === 'L' ? -flap() / 2 : flap() / 2);   // unwrapped
+const targetDw = () => Math.min(250, ST.hole * (G.wideT > 0 ? 1.45 : 1));
 
-/* ------------------------------------------------------------------ input */
+/* The hole must stay fully on screen; everything else wraps around the edge. */
+function validX(x, closed, f) {
+  const open = opp(closed);
+  const lo = open === 'L' ? f : 0, hi = open === 'L' ? W : W - f;
+  let best = x, bd = 1e9;
+  for (const k of [-W, 0, W]) {
+    const c = clamp(x + k, lo, hi), d = Math.abs(c - (x + k));
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
+
+/* ============================================================== input */
 let target = null, keyDir = 0;
 const keys = { left: false, right: false };
-
-function toLogicalX(e) {
-  const r = cv.getBoundingClientRect();
-  return clamp((e.clientX - r.left) * (W / r.width), 0, W);
-}
+const toLogicalX = e => { const r = cv.getBoundingClientRect(); return clamp((e.clientX - r.left) * (W / r.width), 0, W); };
 function begin() {
   if (!G || menuOpen || paused || G.phase !== 'ready') return;
   audio(); G.phase = 'jump'; G.jumpT = 0; sfx.jump();
 }
-window.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || e.buttons) target = toLogicalX(e); keyDir = keyDir; });
+window.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || e.buttons) target = toLogicalX(e); });
 window.addEventListener('pointerdown', e => {
   if (e.target.closest && e.target.closest('#mute')) return;
   if (menuOpen) return;
@@ -264,36 +334,154 @@ window.addEventListener('keyup', e => {
 document.addEventListener('visibilitychange', () => { if (document.hidden && G && !menuOpen && G.phase !== 'over') paused = true; });
 window.addEventListener('blur', () => { if (G && !menuOpen && G.phase !== 'over') paused = true; });
 
-/* ------------------------------------------------------------------ particles / floaters */
+/* ============================================================== effects */
 function burst(x, y, n, cols, sp = 220, life = .6) {
   for (let i = 0; i < n; i++) {
     const a = rand(0, 6.283), s = rand(sp * .3, sp);
-    G.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: rand(life * .5, life), max: life,
-                   c: cols[(Math.random() * cols.length) | 0], s: rand(2, 5) });
+    G.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: rand(life * .5, life), max: life, c: cols[(Math.random() * cols.length) | 0], s: rand(2, 5) });
   }
 }
 function floatText(x, y, txt, col = '#fff') { G.floats.push({ x, y, txt, col, life: 1 }); }
+function hudFloat(txt, col) { G.hudFloats.push({ txt, col, life: 1.4 }); if (G.hudFloats.length > 4) G.hudFloats.shift(); }
+const multiplier = () => 1 + Math.min(4, Math.floor(G.streak / 5));
 
-/* ------------------------------------------------------------------ gameplay */
-function launch(t) {
-  const x0 = flapX(G.closed);
-  const vy = -Math.min(MAX_LAUNCH, ST.launch + t * 110);
-  const spread = Math.min(25 + G.streak * 4, 130);
-  const vx = (W / 2 - x0) * .35 + rand(-1, 1) * spread;
-  G.air = { who: G.inside, x: x0, y: DTOP - 24, vx, vy, t: 0, bonked: false };
-  G.lid[G.closed] = .55;             // flap flung open by the launch
-  G.slam = .18;
+/* ============================================================== spawning (everything flies in from the sides) */
+function spawnObject(prefill) {
+  let ref;
+  if (prefill) ref = rand(110, 430);
+  else {
+    const pool = [];
+    if (G.air) { const a = DTOP - G.air.y; pool.push(a, a, a); } else pool.push(170);
+    for (const c of G.clones) pool.push(DTOP - c.y);
+    ref = pool[(Math.random() * pool.length) | 0];
+  }
+  let alt = prefill ? ref : ref + rand(-420, 300);
+  if (alt < 80) alt = 80 + rand(0, 260);
+
+  const roll = Math.random();
+  const hz = clamp((alt - 600) / 1700, 0, .3), bs = clamp((alt - 300) / 1500, 0, .09);
+  const o = { x: 0, y0: DTOP - alt, y: DTOP - alt, vx: 0, ph: rand(0, 6.28), bobF: rand(1.2, 2.6), bobA: rand(3, 8), age: 0, cd: 0 };
+  if (!prefill && roll < hz) {
+    const k = alt < 1100 ? 0 : alt < 2100 ? (Math.random() < .5 ? 0 : 1) : (Math.random() < .5 ? 1 : 2);
+    Object.assign(o, { kind: 'haz', e: pick(HAZ[Math.min(2, k + (alt > 1800 && Math.random() < .4 ? 1 : 0))]).e, r: 21, tier: 6, vx: rand(80, 170) });
+  } else if (!prefill && roll < hz + bs) {
+    Object.assign(o, { kind: 'boost', e: '🚀', r: 19, tier: 6, vx: rand(70, 120) });
+  } else if (!prefill && roll < hz + bs + .085) {
+    let tot = PUS.reduce((a, p) => a + p.w, 0), r = Math.random() * tot, p = PUS[0];
+    for (const q of PUS) { if ((r -= q.w) <= 0) { p = q; break; } }
+    Object.assign(o, { kind: 'pu', id: p.id, e: p.e, r: 21, tier: 5, vx: rand(60, 100) });
+  } else {
+    const t = pickTier(alt), it = pick(ITEMS[t]);
+    Object.assign(o, { kind: 'item', e: it.e, v: it.v, tier: t, r: 15 + t, vx: it.fast ? rand(95, 150) : rand(45 + t * 12, 85 + t * 16) });
+    if (it.fast) o.bobA = 12;
+  }
+  const dir = Math.random() < .5 ? 1 : -1;
+  o.x = prefill ? rand(40, W - 40) : (dir > 0 ? -34 : W + 34);
+  o.vx *= dir;
+  G.objs.push(o);
+}
+
+/* ============================================================== power-ups */
+function dupBonus(x, y) {
+  G.cash += 5; floatText(x, y - 14, '+$5 already got one!', '#ffe27a'); hudFloat('+$5 bonus', '#ffe27a'); sfx.dup();
+}
+function spawnClones(h) {
+  const n = Math.min(2, CLONE_CAP - G.clones.length);
+  if (n <= 0) return false;
+  for (let i = 0; i < n; i++) {
+    const dir = (n === 1 ? (Math.random() < .5 ? -1 : 1) : (i === 0 ? -1 : 1));
+    G.clones.push({ x: h.x, y: h.y, vx: dir * rand(190, 260) + h.vx * .3, vy: h.vy * .7 + rand(-170, -20), t: 0, cd: 0,
+                    chute: null, pal: CLONE_PALS[G.cloneIdx++ % CLONE_PALS.length] });
+  }
+  burst(h.x, h.y, 14, ['#fff', '#ffe27a', '#ff9a7a'], 240, .5); sfx.clones();
+  return true;
+}
+function applyPowerUp(id, h, isMain, ox, oy) {
+  switch (id) {
+    case 'wide':
+      if (G.wideT > 0) dupBonus(ox, oy); else { floatText(ox, oy - 14, 'WIDE HOLE!', '#9ad8ff'); sfx.powerup(); }
+      G.wideT = PU_TIME; break;
+    case 'net':
+      if (G.netT > 0) dupBonus(ox, oy); else { floatText(ox, oy - 14, 'SAFETY NET!', '#9ad8ff'); sfx.powerup(); }
+      G.netT = PU_TIME; break;
+    case 'saver':
+      if (G.saver) dupBonus(ox, oy); else { G.saver = true; floatText(ox, oy - 14, 'COMBO SAVER!', '#9ad8ff'); sfx.powerup(); }
+      break;
+    case 'chute':
+      if (h.chute) dupBonus(ox, oy); else { h.chute = h.vy > 0 ? 'open' : 'armed'; floatText(ox, oy - 14, 'PARACHUTE!', '#9ad8ff'); sfx.chute(); }
+      break;
+    case 'multi':
+      if (!spawnClones(h)) dupBonus(ox, oy); else floatText(ox, oy - 14, 'MORE HOBOS!', '#9ad8ff');
+      break;
+  }
+}
+
+/* ============================================================== hobo physics (main hobo and clones share it) */
+function physics(h, dt) {
+  h.t += dt; h.cd = Math.max(0, h.cd - dt);
+  if (h.chute === 'armed' && h.vy > 0) h.chute = 'open';
+  let g = GRAV;
+  if (h.chute === 'open') g = GRAV * .22;
+  h.vy += g * dt;
+  if (h.chute === 'open') h.vy = Math.min(h.vy, 170);
+  h.x += h.vx * dt; h.y += h.vy * dt;
+  if (h.x < HR) { h.x = HR; h.vx = Math.abs(h.vx); }
+  if (h.x > W - HR) { h.x = W - HR; h.vx = -Math.abs(h.vx); }
+}
+function touchObjects(h, isMain) {
+  for (let i = G.objs.length - 1; i >= 0; i--) {
+    const o = G.objs[i];
+    if (o.kind === 'haz' && o.cd > 0) continue;
+    const dx = o.x - h.x, dy = o.y - h.y, rr = HR + o.r - 4;
+    if (dx * dx + dy * dy > rr * rr) continue;
+    if (o.kind === 'item') {
+      const gain = o.v * (isMain ? multiplier() : 1);
+      G.cash += gain;
+      floatText(o.x, o.y - 10, `+$${gain}`, isMain ? '#7dffa0' : '#c8ffda');
+      if (!isMain) hudFloat(`+$${gain}`, '#c8ffda');
+      burst(o.x, o.y, 10, ['#ffe27a', '#fff', '#7dffa0'], 200, .5);
+      (o.tier >= 2 ? sfx.coinRare : sfx.coin)();
+      G.objs.splice(i, 1);
+    } else if (o.kind === 'pu') {
+      applyPowerUp(o.id, h, isMain, o.x, o.y);
+      burst(o.x, o.y, 14, ['#9ad8ff', '#fff', '#ffe27a'], 220, .5);
+      G.objs.splice(i, 1);
+    } else if (o.kind === 'boost') {
+      h.vy = (h.vy > 0 ? 0 : h.vy) - 620; h.vy = Math.max(h.vy, -1700);
+      burst(o.x, o.y, 14, ['#7dffa0', '#fff', '#ffe27a'], 240, .5); sfx.boost();
+      floatText(o.x, o.y - 14, 'BOOST!', '#7dffa0');
+      G.objs.splice(i, 1);
+    } else if (o.kind === 'haz') {
+      let nx = h.x - o.x, ny = h.y - o.y; const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;
+      let vx = h.vx, vy = h.vy; const dot = vx * nx + vy * ny;
+      if (dot < 0) { vx -= 2 * dot * nx; vy -= 2 * dot * ny; }
+      vx += nx * 240; vy += ny * 240;
+      const sp = Math.hypot(vx, vy); if (sp > 950) { vx *= 950 / sp; vy *= 950 / sp; }
+      h.vx = vx; h.vy = vy; o.cd = .45; G.shake = Math.max(G.shake, .25);
+      burst(h.x, h.y, 10, ['#ff9a7a', '#fff'], 220, .4); sfx.hazard();
+      floatText(h.x, h.y - 22, 'BUMP!', '#ff9a7a');
+    }
+  }
+}
+
+/* ============================================================== main hobo, launching and landing */
+function launch(d) {
+  const f = flap(), x0 = clamp(wrapX(flapCenter(G.closed)), HR, W - HR);
+  const wobble = Math.min(10 + G.streak * 2, 55);
+  const vx = -FLING * d + rand(-1, 1) * wobble;     // land LEFT in the hole -> next hobo goes RIGHT
+  G.air = { who: G.inside, x: x0, y: DTOP - 24, vx, vy: -ST.launch, t: 0, bonked: false, chute: null, cd: 0 };
+  G.lid[G.closed] = .55; G.slam = .18;
   burst(x0, DTOP - 8, 12, ['#ddd', '#a8a8b8', '#fff'], 180, .45);
   sfx.launch();
 }
 function swapFlaps() { G.closed = opp(G.closed); }
 
 function steer(dt) {
-  const w = DW / 2 + 4;
+  const f = flap(), open = opp(G.closed), off = open === 'L' ? -f / 2 : f / 2;
   let vDes = 0;
   if (keyDir) vDes = keyDir * ST.maxV;
   else if (target != null) {
-    const d = target - G.x;
+    const d = (target - off) - G.x;              // the cursor positions the HOLE, not the dumpster centre
     vDes = Math.sign(d) * Math.min(ST.maxV, Math.sqrt(2 * ST.decel * Math.abs(d)) * .9);
     if (Math.abs(d) < 2) vDes = 0;
   }
@@ -301,130 +489,117 @@ function steer(dt) {
   const braking = G.v !== 0 && Math.sign(dv) !== Math.sign(G.v);
   const rate = braking ? ST.decel : ST.accel;
   G.v += clamp(dv, -rate * dt, rate * dt);
-  if (target != null && !keyDir && Math.abs(target - G.x) < 3 && Math.abs(G.v) < 30) G.v = 0;
+  if (!keyDir && target != null && Math.abs((target - off) - G.x) < 3 && Math.abs(G.v) < 30) G.v = 0;
   G.x += G.v * dt;
-  if (G.x < w) { G.x = w; G.v = 0; }
-  if (G.x > W - w) { G.x = W - w; G.v = 0; }
+  const vx = validX(G.x, G.closed, f);
+  if (vx !== G.x) {
+    const diff = vx - G.x;
+    if (Math.abs(diff) <= 3 + Math.abs(G.v) * dt * 1.5) { G.x = vx; if (Math.sign(diff) !== Math.sign(G.v)) G.v = 0; }
+    else G.x += clamp(diff, -520 * dt, 520 * dt);   // a flap swap left the new hole straddling the edge: slide it in
+  }
 }
 
-function collectItems(h) {
-  for (let i = G.items.length - 1; i >= 0; i--) {
-    const it = G.items[i], dx = it.x - h.x, dy = it.y - h.y, rr = HR + it.t.r;
-    if (dx * dx + dy * dy < rr * rr) {
-      const mult = 1 + Math.min(4, Math.floor(G.streak / 5));
-      const gain = it.t.v * mult;
-      G.cash += gain;
-      floatText(it.x, it.y - 10, `+$${gain}`, '#7dffa0');
-      burst(it.x, it.y, 10, ['#ffe27a', '#fff', '#7dffa0'], 200, .5);
-      sfx.coin();
-      G.items.splice(i, 1);
+function updateMain(dt) {
+  const a = G.air, prevBottom = a.y + HR;
+  physics(a, dt);
+  touchObjects(a, true);
+  G.maxAlt = Math.max(G.maxAlt, DTOP - a.y);
+  const f = flap(), bottom = a.y + HR, level = DTOP - 6;
+  if (!a.bonked && a.vy > 0 && bottom >= level && prevBottom <= level + 6) {
+    const openC = flapCenter(opp(G.closed)), closedC = flapCenter(G.closed);
+    const dh = wd(a.x, openC), dc = wd(a.x, closedC);
+    if (Math.abs(dh) <= f / 2 + 6) {                // caught in the hole!
+      G.streak++; G.catches++; G.bestStreak = Math.max(G.bestStreak, G.streak);
+      const m = multiplier(); G.cash += m; floatText(a.x, DTOP - 40, `+$${m}`, '#ffe27a');
+      burst(a.x, DTOP - 6, 10, ['#fff', '#ffe27a'], 160, .4);
+      const who = a.who;
+      launch(dh);
+      G.inside = who; swapFlaps(); sfx.slam(); G.shake = .3;
+      return;
+    }
+    if (Math.abs(dc) <= f / 2 + 4) {                // landed on the closed flap
+      a.bonked = true; a.vy = -260; a.vx = (dc < 0 ? -1 : 1) * 280; a.chute = null;
+      floatText(a.x, DTOP - 40, 'BONK!', '#ff9a7a'); sfx.bonk();
     }
   }
+  if (a.y + HR >= GROUND) groundHit(a);
+}
+function groundHit(a) {
+  if (G.netT > 0) {                                 // safety net: bounce in a random direction
+    a.y = GROUND - HR - 1; a.vy = -rand(420, 560); a.vx = (Math.random() < .5 ? -1 : 1) * rand(90, 260);
+    a.bonked = false; a.chute = null;
+    if (G.saver) { G.saver = false; floatText(a.x, GROUND - 60, 'COMBO SAVED!', '#9ad8ff'); }
+    else G.streak = 0;
+    burst(a.x, GROUND - 6, 14, ['#9ad8ff', '#fff'], 260, .5); sfx.net(); G.shake = .3;
+    return;
+  }
+  G.splats.push({ x: a.x, t: 0, pal: HOBOS[a.who].pal, big: true });
+  burst(a.x, GROUND - 6, 22, ['#ffe27a', '#fff', '#ff9a7a', '#8fd0ff'], 320, .8);
+  G.shake = 1; sfx.splat();
+  G.deadWho = a.who; G.air = null; G.phase = 'dead'; G.overT = 1.5;
 }
 
+/* ============================================================== update */
 function update(dt) {
   G.time += dt;
-  // shared tweens
-  for (const s of ['L', 'R']) {
-    const goal = s === G.closed ? 0 : 1;
-    G.lid[s] += (goal - G.lid[s]) * Math.min(1, dt * 11);
-  }
-  G.slam = Math.max(0, G.slam - dt);
-  G.shake = Math.max(0, G.shake - dt * 3);
+  for (const s of ['L', 'R']) G.lid[s] += ((s === G.closed ? 0 : 1) - G.lid[s]) * Math.min(1, dt * 11);
+  G.slam = Math.max(0, G.slam - dt); G.shake = Math.max(0, G.shake - dt * 3);
+  G.wideT = Math.max(0, G.wideT - dt); G.netT = Math.max(0, G.netT - dt);
+  G.dw += (targetDw() - G.dw) * Math.min(1, dt * 6);
 
-  // items drift
-  for (const it of G.items) {
-    it.age += dt; it.x += it.vx * dt;
-    if (it.x < 30 || it.x > W - 30) { it.vx = -it.vx; it.x = clamp(it.x, 30, W - 30); }
-    it.y = it.y0 + Math.sin(it.age * it.bobF + it.ph) * it.bobA;
+  // camera follows the airborne hobo up and back down
+  const camTarget = G.air ? Math.min(0, G.air.y - 330) : 0;
+  G.camY += (camTarget - G.camY) * Math.min(1, dt * 9);
+
+  // everything in the air flies in from the side and flies out the other
+  for (let i = G.objs.length - 1; i >= 0; i--) {
+    const o = G.objs[i]; o.age += dt; o.cd = Math.max(0, o.cd - dt); o.x += o.vx * dt;
+    o.y = o.y0 + Math.sin(o.age * o.bobF + o.ph) * o.bobA;
+    if (o.x < -70 || o.x > W + 70) G.objs.splice(i, 1);
   }
-  if (G.phase !== 'over' && G.items.length < ITEM_COUNT) {
+  if (G.phase !== 'over') {
     G.spawnT -= dt;
-    if (G.spawnT <= 0) { G.items.push(newItem()); G.spawnT = rand(.4, 1.1); }
+    if (G.spawnT <= 0) { spawnObject(false); G.spawnT = .3; if (G.objs.length > 90) G.objs.shift(); }
   }
 
-  // particles / floaters
   for (let i = G.parts.length - 1; i >= 0; i--) {
     const p = G.parts[i]; p.life -= dt; if (p.life <= 0) { G.parts.splice(i, 1); continue; }
     p.vy += 600 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
   }
-  for (let i = G.floats.length - 1; i >= 0; i--) {
-    const f = G.floats[i]; f.life -= dt * 1.1; f.y -= 40 * dt; if (f.life <= 0) G.floats.splice(i, 1);
-  }
-  for (let i = G.splats.length - 1; i >= 0; i--) {
-    const s = G.splats[i]; s.t += dt; if (s.t > 3) G.splats.splice(i, 1);
+  for (let i = G.floats.length - 1; i >= 0; i--) { const f = G.floats[i]; f.life -= dt * 1.1; f.y -= 40 * dt; if (f.life <= 0) G.floats.splice(i, 1); }
+  for (let i = G.hudFloats.length - 1; i >= 0; i--) { G.hudFloats[i].life -= dt; if (G.hudFloats[i].life <= 0) G.hudFloats.splice(i, 1); }
+  for (let i = G.splats.length - 1; i >= 0; i--) { const s = G.splats[i]; s.t += dt; if (s.t > 3) G.splats.splice(i, 1); }
+
+  // clones live their own lives, on screen or off
+  for (let i = G.clones.length - 1; i >= 0; i--) {
+    const c = G.clones[i]; physics(c, dt); touchObjects(c, false);
+    if (c.y + HR >= GROUND) {
+      G.splats.push({ x: c.x, t: 0, pal: c.pal, big: false });
+      burst(c.x, GROUND - 6, 10, ['#fff', '#ffe27a'], 200, .5); sfx.cloneSplat();
+      G.clones.splice(i, 1);
+    }
   }
 
   if (G.phase === 'jump' || G.phase === 'fly') steer(dt);
-
   if (G.phase === 'jump') {
     G.jumpT += dt / .42;
-    if (G.jumpT >= 1) {                       // jumper lands on the open flap -> launch the hidden hobo
-      launch(.3);
-      G.inside = G.jumper;
-      swapFlaps();
-      sfx.slam(); G.shake = .25;
-      G.phase = 'fly';
+    if (G.jumpT >= 1) {
+      launch(0); G.inside = G.jumper; swapFlaps(); sfx.slam(); G.shake = .25; G.phase = 'fly';
     }
-  } else if (G.phase === 'fly') {
-    updateAir(dt);
-  } else if (G.phase === 'dead') {
-    G.overT -= dt; if (G.overT <= 0) endRun();
-  }
-}
-
-function updateAir(dt) {
-  const a = G.air; a.t += dt;
-  const prevBottom = a.y + HR;
-  a.vy += GRAV * dt; a.x += a.vx * dt; a.y += a.vy * dt;
-  if (a.x < HR) { a.x = HR; a.vx = Math.abs(a.vx); }
-  if (a.x > W - HR) { a.x = W - HR; a.vx = -Math.abs(a.vx); }
-  if (!a.bonked) collectItems(a);
-
-  const bottom = a.y + HR, level = DTOP - 6;
-  const over = a.x > G.x - DW / 2 - 6 && a.x < G.x + DW / 2 + 6;
-  if (!a.bonked && a.vy > 0 && over && bottom >= level && prevBottom <= level + 6) {
-    const side = a.x < G.x ? 'L' : 'R';
-    if (side !== G.closed) {                      // open flap: caught!
-      const edge = clamp(Math.abs(a.x - G.x) / (DW / 2), 0, 1);
-      G.streak++; G.catches++; G.bestStreak = Math.max(G.bestStreak, G.streak);
-      const mult = 1 + Math.min(4, Math.floor(G.streak / 5));
-      G.cash += mult; floatText(a.x, DTOP - 40, `+$${mult}`, '#ffe27a');
-      burst(a.x, DTOP - 6, 10, ['#fff', '#ffe27a'], 160, .4);
-      const who = a.who;
-      launch(edge);                               // hidden hobo bursts out of the closed flap
-      G.inside = who;                             // the one who landed is now inside
-      swapFlaps();
-      G.lid[opp(G.closed)] = Math.max(G.lid[opp(G.closed)], .6);
-      sfx.slam(); G.shake = .3;
-      return;
-    } else {                                      // closed flap: bonk
-      a.bonked = true;
-      a.vy = -260; a.vx = (a.x < G.x ? -1 : 1) * 280;
-      floatText(a.x, DTOP - 40, 'BONK!', '#ff9a7a'); sfx.slam();
-    }
-  }
-  if (a.y + HR >= GROUND) splat(a);
-}
-
-function splat(a) {
-  G.splats.push({ x: a.x, t: 0, who: a.who });
-  burst(a.x, GROUND - 6, 22, ['#ffe27a', '#fff', '#ff9a7a', '#8fd0ff'], 320, .8);
-  G.shake = 1; sfx.splat();
-  G.deadWho = a.who; G.air = null;
-  G.phase = 'dead'; G.overT = 1.5;
+  } else if (G.phase === 'fly' && G.air) updateMain(dt);
+  else if (G.phase === 'dead') { G.overT -= dt; if (G.overT <= 0) endRun(); }
 }
 
 function endRun() {
   G.phase = 'over';
   S.cash += G.cash;
-  const newBest = G.cash > S.best;
-  if (newBest) S.best = G.cash;
+  const newBest = G.cash > S.bestCash; if (newBest) S.bestCash = G.cash;
+  const peak = Math.round(G.maxAlt / 10), newPeak = peak > S.bestAlt; if (newPeak) S.bestAlt = peak;
   save();
-  showMenu({ cash: G.cash, catches: G.catches, streak: G.bestStreak, who: HOBOS[G.deadWho].name, newBest });
+  showMenu({ cash: G.cash, catches: G.catches, streak: G.bestStreak, peak, who: HOBOS[G.deadWho].name, newBest, newPeak });
 }
 
-/* ------------------------------------------------------------------ hobo sprite */
+/* ============================================================== hobo sprite */
 function rr(c, x, y, w, h, r) {
   c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
   c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
@@ -434,29 +609,34 @@ function limb(c, x0, y0, ang, len, col, wid, endCol) {
   c.strokeStyle = col; c.lineWidth = wid; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
   c.fillStyle = endCol; c.beginPath(); c.arc(x1, y1, wid * .62, 0, 7); c.fill();
 }
-/* mode: 'fly' = flailing arms and legs, 'stand' = idle on the flap. Same animation for every hobo, palette swapped. */
-function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3) {
+/* mode 'fly' = flailing arms and legs, 'stand' = idle. Same animation for every hobo; only the palette changes. */
+function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3, chute = null) {
   const c = ctx, fly = mode === 'fly';
-  c.save(); c.translate(x, y); c.rotate(rot); c.scale(sc, sc);
+  c.save(); c.translate(x, y);
+  if (chute === 'open') {                           // parachute canopy
+    c.save(); const cr = 30 * sc / 1.3;
+    c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1;
+    c.beginPath(); for (const k of [-1, -.35, .35, 1]) { c.moveTo(k * cr, -48 * sc / 1.3); c.lineTo(0, -12 * sc / 1.3); } c.stroke();
+    for (let i = 0; i < 4; i++) { c.fillStyle = i % 2 ? '#fff' : '#e8503a'; c.beginPath(); c.moveTo(-cr + i * cr / 2, -48 * sc / 1.3); c.arc(0, -48 * sc / 1.3, cr, Math.PI + i * Math.PI / 4, Math.PI + (i + 1) * Math.PI / 4); c.closePath(); c.fill(); }
+    c.restore();
+  } else if (chute === 'armed') {
+    c.fillStyle = '#e8503a'; rr(c, -5, -10 * sc / 1.3, 10, 12, 3); c.fill();
+  }
+  c.rotate(rot); c.scale(sc, sc);
   c.lineCap = 'round'; c.lineJoin = 'round';
   const s1 = fly ? Math.sin(tt * 17) : Math.sin(tt * 3) * .12;
   const s2 = fly ? Math.sin(tt * 17 + 1.9) : Math.sin(tt * 3 + 1.2) * .12;
-  // legs
   limb(c, -4, 8, (fly ? .45 : .1) + s1 * .75, 13, pal.pants, 5.5, pal.shoe);
   limb(c,  4, 8, -(fly ? .45 : .1) + s2 * .75, 13, pal.pants, 5.5, pal.shoe);
-  // arms (behind body)
   const armBase = fly ? Math.PI : 0;
   limb(c, -8, -4, armBase + (fly ? -.5 : .22) + s2 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
   limb(c,  8, -4, armBase + (fly ? .5 : -.22) + s1 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
-  // coat
   c.fillStyle = pal.coat; rr(c, -9.5, -8, 19, 18, 5); c.fill();
   c.fillStyle = pal.coat2; c.fillRect(-1, -8, 2, 18);
   c.fillStyle = pal.patch; rr(c, 2.5, 1, 5.5, 5.5, 1.2); c.fill();
   c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = .8; c.setLineDash([1.2, 1.2]); rr(c, 2.5, 1, 5.5, 5.5, 1.2); c.stroke(); c.setLineDash([]);
-  // head
   c.fillStyle = pal.skin; c.beginPath(); c.arc(0, -15, 7.6, 0, 7); c.fill();
   c.fillStyle = 'rgba(40,28,22,.5)'; c.beginPath(); c.arc(0, -15, 7.6, .35, Math.PI - .35); c.fill();
-  // face
   if (fly) {
     c.fillStyle = '#fff'; c.beginPath(); c.arc(-3, -16.5, 2.3, 0, 7); c.arc(3, -16.5, 2.3, 0, 7); c.fill();
     c.fillStyle = '#111'; c.beginPath(); c.arc(-3, -16.2, 1.1, 0, 7); c.arc(3, -16.2, 1.1, 0, 7); c.fill();
@@ -465,120 +645,197 @@ function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3) {
     c.fillStyle = '#111'; c.beginPath(); c.arc(-3, -16, 1.1, 0, 7); c.arc(3, -16, 1.1, 0, 7); c.fill();
     c.strokeStyle = '#4a1010'; c.lineWidth = 1; c.beginPath(); c.arc(0, -13, 2.4, .2, Math.PI - .2); c.stroke();
   }
-  // beanie
   c.fillStyle = pal.hat; c.beginPath(); c.arc(0, -17.5, 8.1, Math.PI, 0); c.fill();
   c.fillStyle = pal.hat2; rr(c, -8.4, -19, 16.8, 4, 1.6); c.fill();
   c.fillStyle = pal.hat2; c.beginPath(); c.arc(0, -26, 2.6, 0, 7); c.fill();
   c.restore();
 }
 
-/* ------------------------------------------------------------------ drawing */
-function drawDumpster() {
-  const x = G.x, w = DW, bounce = G.slam > 0 ? Math.sin(G.slam * 40) * 2 : 0;
+/* ============================================================== drawing */
+const copies = (cx, half) => [-W, 0, W].map(o => cx + o).filter(x => x + half > -2 && x - half < W + 2);
+
+function drawDumpsterAt(xx) {
+  const w = G.dw, f = w / 2, bounce = G.slam > 0 ? Math.sin(G.slam * 40) * 2 : 0;
   ctx.save(); ctx.translate(0, bounce);
-  // wheels
   ctx.fillStyle = '#16161e';
-  for (const dx of [-w / 2 + 16, w / 2 - 16]) { ctx.beginPath(); ctx.arc(x + dx, DTOP + 70, 8, 0, 7); ctx.fill(); }
-  // body
+  for (const dx of [-w / 2 + 16, w / 2 - 16]) { ctx.beginPath(); ctx.arc(xx + dx, DTOP + 70, 8, 0, 7); ctx.fill(); }
   ctx.fillStyle = '#2e7d4f'; ctx.beginPath();
-  ctx.moveTo(x - w / 2, DTOP); ctx.lineTo(x + w / 2, DTOP); ctx.lineTo(x + w / 2 - 9, DTOP + 66); ctx.lineTo(x - w / 2 + 9, DTOP + 66); ctx.closePath(); ctx.fill();
+  ctx.moveTo(xx - w / 2, DTOP); ctx.lineTo(xx + w / 2, DTOP); ctx.lineTo(xx + w / 2 - 9, DTOP + 66); ctx.lineTo(xx - w / 2 + 9, DTOP + 66); ctx.closePath(); ctx.fill();
   ctx.fillStyle = 'rgba(0,0,0,.2)';
-  for (let i = 1; i < 5; i++) ctx.fillRect(x - w / 2 + i * (w / 5) - 1.5, DTOP + 6, 3, 56);
-  ctx.fillStyle = '#245f3c'; ctx.fillRect(x - w / 2 + 5, DTOP + 22, w - 10, 4);
-  ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(x - w / 2, DTOP, w, 3);
-  // grime + sticker
-  ctx.fillStyle = 'rgba(255,255,255,.14)'; rr(ctx, x - 16, DTOP + 34, 32, 18, 3); ctx.fill();
-  ctx.fillStyle = '#2a2a33'; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('NO DIVING', x, DTOP + 46);
-  // the dark gap under the closed flap + two eyes peeking out
-  const cx = flapX(G.closed);
-  ctx.fillStyle = '#0b0d10'; ctx.fillRect(cx - FLAP / 2 + 4, DTOP + 4, FLAP - 8, 15);
-  if (G.phase !== 'over' && G.phase !== 'dead' || G.phase === 'dead') {
-    const blink = (Math.floor(G.time * 2.2) % 9 === 0) ? 0 : 1;
-    ctx.fillStyle = '#fff';
-    for (const dx of [-9, 9]) { ctx.beginPath(); ctx.ellipse(cx + dx, DTOP + 11, 4, 4.6 * blink + .6, 0, 0, 7); ctx.fill(); }
-    ctx.fillStyle = '#111';
-    for (const dx of [-9, 9]) { ctx.beginPath(); ctx.arc(cx + dx + clamp((G.air ? G.air.x - cx : 0) / 60, -1.5, 1.5), DTOP + 11, 1.8, 0, 7); ctx.fill(); }
-  }
+  for (let i = 1; i < 5; i++) ctx.fillRect(xx - w / 2 + i * (w / 5) - 1.5, DTOP + 6, 3, 56);
+  ctx.fillStyle = '#245f3c'; ctx.fillRect(xx - w / 2 + 5, DTOP + 22, w - 10, 4);
+  ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(xx - w / 2, DTOP, w, 3);
+  ctx.fillStyle = 'rgba(255,255,255,.14)'; rr(ctx, xx - 16, DTOP + 34, 32, 18, 3); ctx.fill();
+  ctx.fillStyle = '#2a2a33'; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('NO DIVING', xx, DTOP + 46);
+  const cx = xx + (G.closed === 'L' ? -f / 2 : f / 2);
+  ctx.fillStyle = '#0b0d10'; ctx.fillRect(cx - f / 2 + 4, DTOP + 4, f - 8, 15);
+  const blink = (Math.floor(G.time * 2.2) % 9 === 0) ? 0 : 1, look = clamp(((G.air ? G.air.x : cx) - cx) / 60, -1.5, 1.5);
+  ctx.fillStyle = '#fff';
+  for (const dx of [-9, 9]) { ctx.beginPath(); ctx.ellipse(cx + dx, DTOP + 11, 4, 4.6 * blink + .6, 0, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#111';
+  for (const dx of [-9, 9]) { ctx.beginPath(); ctx.arc(cx + dx + look, DTOP + 11, 1.8, 0, 7); ctx.fill(); }
   ctx.restore();
 }
-function drawFlaps() {
-  const w = DW, bounce = G.slam > 0 ? Math.sin(G.slam * 40) * 2 : 0;
+function drawFlapsAt(xx) {
+  const w = G.dw, f = w / 2, bounce = G.slam > 0 ? Math.sin(G.slam * 40) * 2 : 0;
   for (const side of ['L', 'R']) {
-    const a = G.lid[side], dir = side === 'L' ? 1 : -1;
-    const hx = side === 'L' ? G.x - w / 2 : G.x + w / 2;
+    const a = G.lid[side], dir = side === 'L' ? 1 : -1, hx = side === 'L' ? xx - w / 2 : xx + w / 2;
     ctx.save(); ctx.translate(hx, DTOP - 3 + bounce); ctx.rotate(-dir * a * 1.95);
-    const x0 = dir === 1 ? 0 : -FLAP;
-    ctx.fillStyle = '#1d5a37'; rr(ctx, x0, -8, FLAP, 9, 2.5); ctx.fill();
-    ctx.fillStyle = '#3aa06a'; ctx.fillRect(x0 + 2, -8, FLAP - 4, 3);
-    ctx.fillStyle = '#10301f'; ctx.beginPath(); ctx.arc(x0 + (dir === 1 ? FLAP - 8 : 8), -3.5, 2.3, 0, 7); ctx.fill();
+    const x0 = dir === 1 ? 0 : -f;
+    ctx.fillStyle = '#1d5a37'; rr(ctx, x0, -8, f, 9, 2.5); ctx.fill();
+    ctx.fillStyle = '#3aa06a'; ctx.fillRect(x0 + 2, -8, f - 4, 3);
+    ctx.fillStyle = '#10301f'; ctx.beginPath(); ctx.arc(x0 + (dir === 1 ? f - 8 : 8), -3.5, 2.3, 0, 7); ctx.fill();
     ctx.restore();
   }
 }
-function drawJump() {
-  // J leaps from the closed flap to the open flap
-  const u = clamp(G.jumpT, 0, 1);
-  const from = flapX(G.closed), to = flapX(opp(G.closed));
-  const x = lerp(from, to, u), y = DTOP - 22 - Math.sin(Math.PI * u) * 80;
-  drawHobo(x, y, (to > from ? 1 : -1) * Math.sin(Math.PI * u) * .5, G.time, HOBOS[G.jumper].pal, 'fly');
-}
-function drawScene() {
-  ctx.drawImage(bg, 0, 0, W, H);
-  // items
+function drawObj(o) {
+  const t = G.time;
+  ctx.save(); ctx.translate(o.x, o.y);
+  if (o.kind === 'pu') {
+    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, o.r + 10 + Math.sin(t * 6) * 2);
+    g.addColorStop(0, 'rgba(255,240,150,.95)'); g.addColorStop(.6, 'rgba(255,207,74,.55)'); g.addColorStop(1, 'rgba(255,207,74,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, o.r + 12, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(20,24,50,.88)'; ctx.strokeStyle = '#ffe27a'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(0, 0, o.r, 0, 7); ctx.fill(); ctx.stroke();
+  } else if (o.kind === 'haz') {
+    const p = .5 + Math.sin(t * 9) * .5;
+    ctx.strokeStyle = `rgba(255,70,60,${.55 + p * .4})`; ctx.lineWidth = 3; ctx.fillStyle = 'rgba(255,40,40,.16)';
+    ctx.beginPath(); ctx.arc(0, 0, o.r + 3 + p * 2, 0, 7); ctx.fill(); ctx.stroke();
+  } else if (o.kind === 'boost') {
+    const p = .5 + Math.sin(t * 8) * .5;
+    ctx.strokeStyle = `rgba(110,255,160,${.6 + p * .35})`; ctx.lineWidth = 3; ctx.fillStyle = 'rgba(80,255,150,.16)';
+    ctx.beginPath(); ctx.arc(0, 0, o.r + 3 + p * 2, 0, 7); ctx.fill(); ctx.stroke();
+  } else if (o.kind === 'item' && TIERS[o.tier].glow) {
+    const gl = TIERS[o.tier].glow, p = .6 + Math.sin(t * 5 + o.ph) * .4;
+    const g = ctx.createRadialGradient(0, 0, 2, 0, 0, o.r + 14);
+    g.addColorStop(0, gl); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = .55 * p; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, o.r + 14, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+  }
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  for (const it of G.items) { ctx.font = `${it.t.r * 2}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.fillText(it.t.e, it.x, it.y); }
-  ctx.textBaseline = 'alphabetic';
+  ctx.font = `${o.kind === 'pu' ? 24 : o.r * 2}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  ctx.fillStyle = '#fff'; ctx.fillText(o.e, 0, o.kind === 'pu' ? 1 : 0);
+  ctx.restore(); ctx.textBaseline = 'alphabetic';
+}
+function drawHoboFlying(h, pal, sc) {
+  const rot = Math.sin(h.t * 6 + (h.who || 0)) * .35 + clamp(h.vx / 700, -.5, .5);
+  drawHobo(h.x, h.y, h.chute === 'open' ? rot * .3 : rot, h.t + (h.who || 0), pal, 'fly', sc, h.chute);
+}
+
+function drawWorld() {
+  // sky above the alley darkens toward space
+  const sg = ctx.createLinearGradient(0, -6000, 0, 0);
+  sg.addColorStop(0, '#010208'); sg.addColorStop(1, '#0b0e2c');
+  ctx.fillStyle = sg; ctx.fillRect(0, -6000, W, 6000 + 4);
+  const altShade = clamp(-G.camY / 900, 0, 1);
+  if (altShade > 0) {                               // parallax stars, drawn in screen space behind the alley
+    ctx.save(); ctx.translate(0, G.camY);
+    const off = (-G.camY * .3) % H;
+    ctx.globalAlpha = altShade; ctx.drawImage(stars, 0, off, W, H); ctx.drawImage(stars, 0, off - H, W, H);
+    ctx.restore();
+  }
+  ctx.drawImage(bg, 0, 0, W, H);
+
+  // pooled objects: junk by rarity (rarer on top), then power-ups, then bumpers
+  const sorted = G.objs.slice().sort((a, b) => a.tier - b.tier);
+  for (const o of sorted) drawObj(o);
+
   // splats
   for (const s of G.splats) {
-    const k = Math.min(1, s.t * 6), fade = clamp(1 - (s.t - 2) , 0, 1);
+    const k = Math.min(1, s.t * 6), fade = clamp(1 - (s.t - 2), 0, 1), sc = s.big ? 1 : .6;
     ctx.save(); ctx.globalAlpha = fade; ctx.translate(s.x, GROUND - 3);
-    ctx.fillStyle = HOBOS[s.who].pal.coat; ctx.beginPath(); ctx.ellipse(0, 0, 30 * k, 7 * k, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = HOBOS[s.who].pal.skin; ctx.beginPath(); ctx.arc(-6 * k, -2, 6 * k, 0, 7); ctx.fill();
-    ctx.strokeStyle = HOBOS[s.who].pal.pants; ctx.lineWidth = 4; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(-24 * k, 0); ctx.lineTo(-38 * k, 3); ctx.moveTo(24 * k, 0); ctx.lineTo(40 * k, -1); ctx.stroke();
-    // dizzy stars
-    ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
-    for (let i = 0; i < 3; i++) { const an = s.t * 5 + i * 2.1; ctx.fillText('★', Math.cos(an) * 22, -22 + Math.sin(an) * 6); }
-    ctx.font = '900 26px system-ui'; ctx.lineWidth = 5; ctx.strokeStyle = '#3a0d00'; ctx.fillStyle = '#ffcf4a';
-    const ty = -48 - Math.min(s.t, .6) * 30, tx = clamp(s.x, 62, W - 62) - s.x; ctx.strokeText('SPLAT!', tx, ty); ctx.fillText('SPLAT!', tx, ty);
+    ctx.fillStyle = s.pal.coat; ctx.beginPath(); ctx.ellipse(0, 0, 30 * k * sc, 7 * k * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = s.pal.skin; ctx.beginPath(); ctx.arc(-6 * k * sc, -2, 6 * k * sc, 0, 7); ctx.fill();
+    ctx.strokeStyle = s.pal.pants; ctx.lineWidth = 4 * sc; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-24 * k * sc, 0); ctx.lineTo(-38 * k * sc, 3); ctx.moveTo(24 * k * sc, 0); ctx.lineTo(40 * k * sc, -1); ctx.stroke();
+    if (s.big) {
+      ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
+      for (let i = 0; i < 3; i++) { const an = s.t * 5 + i * 2.1; ctx.fillText('★', Math.cos(an) * 22, -22 + Math.sin(an) * 6); }
+      ctx.font = '900 26px system-ui'; ctx.lineWidth = 5; ctx.strokeStyle = '#3a0d00'; ctx.fillStyle = '#ffcf4a';
+      const ty = -48 - Math.min(s.t, .6) * 30, tx = clamp(s.x, 62, W - 62) - s.x; ctx.strokeText('SPLAT!', tx, ty); ctx.fillText('SPLAT!', tx, ty);
+    }
     ctx.restore();
   }
-  drawDumpster();
-  // standing jumper (ready phase)
+  // safety net: springy ground
+  if (G.netT > 0) {
+    const p = .55 + Math.sin(G.time * 10) * .25, fade = Math.min(1, G.netT / 1.2);
+    ctx.save(); ctx.globalAlpha = fade * p;
+    const ng = ctx.createLinearGradient(0, GROUND - 22, 0, GROUND + 6); ng.addColorStop(0, 'rgba(120,220,255,0)'); ng.addColorStop(1, 'rgba(120,220,255,.85)');
+    ctx.fillStyle = ng; ctx.fillRect(0, GROUND - 22, W, 28);
+    ctx.strokeStyle = '#bff0ff'; ctx.lineWidth = 2; ctx.beginPath();
+    for (let x = 0; x <= W; x += 18) ctx.lineTo(x, GROUND - 3 + ((x / 18) % 2 ? -6 : 0)); ctx.stroke();
+    ctx.restore();
+  }
+  // dumpster (drawn at every wrapped copy that touches the screen)
+  const xs = copies(G.x, G.dw / 2 + 14);
+  for (const xx of xs) drawDumpsterAt(xx);
   if (G.phase === 'ready') {
     const bob = Math.sin(G.time * 3) * 1.2;
-    drawHobo(flapX(G.closed), DTOP - 28 + bob, 0, G.time, HOBOS[G.jumper].pal, 'stand');
-  } else if (G.phase === 'jump') drawJump();
-  drawFlaps();
-  // flying hobo
-  if (G.air) {
-    const a = G.air, rot = Math.sin(a.t * 6 + a.who) * .35 + clamp(a.vx / 700, -.5, .5);
-    drawHobo(a.x, a.y, rot, a.t + a.who, HOBOS[a.who].pal, 'fly');
+    for (const xx of copies(flapCenter(G.closed), 20)) drawHobo(xx, DTOP - 28 + bob, 0, G.time, HOBOS[G.jumper].pal, 'stand');
+  } else if (G.phase === 'jump') {
+    const u = clamp(G.jumpT, 0, 1), from = flapCenter(G.closed), to = flapCenter(opp(G.closed));
+    const hx = lerp(from, to, u), hy = DTOP - 22 - Math.sin(Math.PI * u) * 80;
+    for (const xx of copies(hx, 20)) drawHobo(xx, hy, (to > from ? 1 : -1) * Math.sin(Math.PI * u) * .5, G.time, HOBOS[G.jumper].pal, 'fly');
   }
-  // particles
+  for (const xx of xs) drawFlapsAt(xx);
+
+  for (const c of G.clones) drawHoboFlying(c, c.pal, 1.05);
+  if (G.air) drawHoboFlying(G.air, HOBOS[G.air.who].pal, 1.3);
+
   for (const p of G.parts) { ctx.globalAlpha = clamp(p.life / p.max, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s); }
   ctx.globalAlpha = 1;
-  // floaters
-  ctx.textAlign = 'center'; ctx.font = '900 22px system-ui'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.7)';
-  for (const f of G.floats) { ctx.globalAlpha = clamp(f.life, 0, 1); ctx.strokeText(f.txt, f.x, f.y); ctx.fillStyle = f.col; ctx.fillText(f.txt, f.x, f.y); }
+  ctx.textAlign = 'center'; ctx.font = '900 20px system-ui'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.7)';
+  for (const f of G.floats) {
+    const tx = clamp(f.x, 70, W - 70); ctx.globalAlpha = clamp(f.life, 0, 1);
+    ctx.strokeText(f.txt, tx, f.y); ctx.fillStyle = f.col; ctx.fillText(f.txt, tx, f.y);
+  }
   ctx.globalAlpha = 1;
 }
+
 function hudText(txt, x, y, size, col, align = 'left') {
   ctx.font = `900 ${size}px system-ui`; ctx.textAlign = align; ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.75)';
   ctx.strokeText(txt, x, y); ctx.fillStyle = col; ctx.fillText(txt, x, y);
 }
 function drawHud() {
-  hudText(`$${G.cash}`, 16, 40, 34, '#7dffa0');
+  hudText(`$${G.cash}`, 14, 38, 32, '#7dffa0');
+  let hy = 62;
+  for (const f of G.hudFloats) { ctx.globalAlpha = clamp(f.life, 0, 1); hudText(f.txt, 16, hy, 16, f.col); hy += 18; }
+  ctx.globalAlpha = 1;
+  // active power-ups
+  let py = 64 + G.hudFloats.length * 18 + 6;
+  const bar = (icon, frac, col) => {
+    ctx.font = '18px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.fillText(icon, 14, py + 14);
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(40, py + 5, 70, 8);
+    ctx.fillStyle = col; ctx.fillRect(40, py + 5, 70 * clamp(frac, 0, 1), 8); py += 24;
+  };
+  if (G.wideT > 0) bar('↔️', G.wideT / PU_TIME, '#9ad8ff');
+  if (G.netT > 0) bar('🥅', G.netT / PU_TIME, '#9ad8ff');
+  if (G.saver) bar('🛡️', 1, '#ffe27a');
+  if (G.clones.length) bar('👥', G.clones.length / CLONE_CAP, '#c9a0ff');
+
   if (G.phase === 'fly' || G.phase === 'dead') {
-    const mult = 1 + Math.min(4, Math.floor(G.streak / 5));
-    hudText(`${G.streak} bounce${G.streak === 1 ? '' : 's'}${mult > 1 ? `  ×${mult}` : ''}`, W / 2 + 10, 34, 20, '#ffe27a', 'center');
+    const m = multiplier();
+    hudText(`${G.streak} bounce${G.streak === 1 ? '' : 's'}${m > 1 ? `  ×${m}` : ''}`, W / 2 + 14, 32, 20, '#ffe27a', 'center');
+    const alt = Math.round(Math.max(0, DTOP - (G.air ? G.air.y : DTOP)) / 10);
+    if (G.maxAlt > 40) hudText(`${Math.round(G.maxAlt / 10)} m peak`, W / 2 + 14, 54, 14, 'rgba(255,255,255,.8)', 'center');
+  }
+  // the hole indicator: when the dumpster scrolls out of view, a thick line shows where the open hole is
+  const dumpTopScreen = DTOP - G.camY;
+  const vis = clamp((dumpTopScreen - (H - 40)) / 90, 0, 1);
+  if (vis > 0 && G.phase !== 'ready') {
+    const f = flap(), hc = wrapX(flapCenter(opp(G.closed))), y = H - 16;
+    ctx.save(); ctx.globalAlpha = vis; ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,207,74,.28)'; ctx.lineWidth = 18;
+    ctx.beginPath(); ctx.moveTo(hc - f / 2 + 4, y); ctx.lineTo(hc + f / 2 - 4, y); ctx.stroke();
+    ctx.strokeStyle = '#ffcf4a'; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.moveTo(hc - f / 2 + 4, y); ctx.lineTo(hc + f / 2 - 4, y); ctx.stroke();
+    ctx.restore();
   }
   if (G.phase === 'ready' && !menuOpen) {
-    const blink = .6 + Math.sin(G.time * 5) * .4;
-    ctx.globalAlpha = blink;
+    ctx.globalAlpha = .6 + Math.sin(G.time * 5) * .4;
     hudText('TAP · CLICK', W / 2, 200, 38, '#fff', 'center');
     hudText('or press ← →', W / 2, 238, 26, '#fff', 'center');
     ctx.globalAlpha = .85;
-    hudText('then steer: the dumpster chases', W / 2, 282, 16, '#ffe27a', 'center');
+    hudText('then steer: the hole chases', W / 2, 282, 16, '#ffe27a', 'center');
     hudText('your cursor or finger', W / 2, 303, 16, '#ffe27a', 'center');
     ctx.globalAlpha = 1;
   }
@@ -589,34 +846,34 @@ function drawHud() {
   }
 }
 
-/* ------------------------------------------------------------------ menu / shop (DOM) */
+/* ============================================================== menu / shop (DOM) */
 const overlay = document.getElementById('overlay'), card = document.getElementById('card');
-function pips(lv) { return '●'.repeat(lv) + '○'.repeat(MAX_LV - lv); }
-let lastResult = null;
 function showMenu(res) {
-  lastResult = res;
-  menuOpen = true; overlay.classList.remove('hidden');
+  lastResult = res; menuOpen = true; overlay.classList.remove('hidden');
   const first = !res;
   card.innerHTML = `
     <h1>DUMPSTER DIVERS</h1>
-    <p class="sub">${first ? 'Gutter Gary &amp; Dumpy Dave want that trash. Bounce them. Grab stuff. Don’t hit the pavement.' : 'Another one bites the asphalt.'}</p>
+    <p class="sub">${first ? 'Gutter Gary &amp; Dumpy Dave want that trash. Bounce them, grab stuff, don’t hit the pavement.' : 'Another one bites the asphalt.'}</p>
     ${res ? `<div class="result"><b>${res.who}</b> got flattened.<br>
-      Earned <b>$${res.cash}</b> · ${res.catches} bounce${res.catches === 1 ? '' : 's'} · best streak ${res.streak}${res.newBest ? ' · <b>NEW RECORD!</b>' : ''}</div>` : ''}
+      Earned <b>$${res.cash}</b> · ${res.catches} bounce${res.catches === 1 ? '' : 's'} · best streak ${res.streak}<br>
+      Peak <b>${res.peak} m</b>${res.newPeak ? ' <b>(new high!)</b>' : ''}${res.newBest ? ' · <b>best haul!</b>' : ''}</div>` : ''}
     <div class="cash">Stash: <span>$${S.cash}</span></div>
     ${UPGRADES.map(u => {
       const lv = S[u.id], maxed = lv >= MAX_LV, cost = costOf(u);
-      return `<div class="row"><div class="nm"><b>${u.name}</b><small>${u.desc}</small><div class="pips">${pips(lv)}</div></div>
+      return `<div class="row"><div class="nm"><b>${u.name}</b><small>${u.desc}</small>
+        <div class="bar"><i style="width:${lv / MAX_LV * 100}%"></i></div>
+        <div class="lv">Lv ${lv}/${MAX_LV} · now +${(lv * u.pct).toFixed(lv ? 1 : 0)}%</div></div>
         <button data-buy="${u.id}" ${maxed || S.cash < cost ? 'disabled' : ''}>${maxed ? 'MAX' : '$' + cost}</button></div>`;
     }).join('')}
     <button class="go" id="go">${first ? 'DIVE IN' : 'TRY AGAIN'}</button>
-    <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>The dumpster starts slow — that’s what the upgrades are for.<br>Best haul: $${S.best}</div>
+    <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>Land on the LEFT of the hole and the next hobo flies RIGHT.<br>Best haul $${S.bestCash} · highest ${S.bestAlt} m</div>
     <button class="reset" id="reset">reset progress</button>`;
 }
 card.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   audio();
   if (b.id === 'go') { startRun(); return; }
-  if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, best: 0, muted: S.muted }; save(); showMenu(null); } return; }
+  if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, hole: 0, bestCash: 0, bestAlt: 0, muted: S.muted }; save(); showMenu(null); } return; }
   const id = b.dataset.buy; if (!id) return;
   const u = UPGRADES.find(x => x.id === id), cost = costOf(u);
   if (S[id] < MAX_LV && S.cash >= cost) {
@@ -624,37 +881,40 @@ card.addEventListener('click', e => {
     const st = card.scrollTop; showMenu(lastResult); card.scrollTop = st;
   }
 });
-
 function startRun() {
-  audio();
-  G = newRun(); paused = false; target = null; keyDir = 0; keys.left = keys.right = false;
+  audio(); newRun(); paused = false; target = null; keyDir = 0; keys.left = keys.right = false;
   menuOpen = false; overlay.classList.add('hidden');
 }
 
-/* ------------------------------------------------------------------ main loop */
+/* ============================================================== main loop */
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(.033, (now - last) / 1000); last = now;
   if (G) {
     if (!menuOpen && !paused) update(dt);
-    else if (menuOpen) { G.time += dt; for (const it of G.items) { it.age += dt; it.y = it.y0 + Math.sin(it.age * it.bobF + it.ph) * it.bobA; } for (const s of ['L','R']) G.lid[s] += ((s === G.closed ? 0 : 1) - G.lid[s]) * Math.min(1, dt * 11); G.splats.length = 0; }
+    else if (menuOpen) {                                 // idle animation behind the menu
+      G.time += dt;
+      for (const o of G.objs) { o.age += dt; o.x += o.vx * dt; o.y = o.y0 + Math.sin(o.age * o.bobF + o.ph) * o.bobA; if (o.x < -70 || o.x > W + 70) o.x = o.vx > 0 ? -60 : W + 60; }
+      for (const s of ['L', 'R']) G.lid[s] += ((s === G.closed ? 0 : 1) - G.lid[s]) * Math.min(1, dt * 11);
+      G.splats.length = 0; G.camY += (0 - G.camY) * Math.min(1, dt * 6);
+    }
     const sc = cv.width / W;
     ctx.setTransform(sc, 0, 0, sc, 0, 0);
     ctx.save();
     if (G.shake > 0) ctx.translate(rand(-1, 1) * G.shake * 6, rand(-1, 1) * G.shake * 6);
-    drawScene();
+    ctx.save(); ctx.translate(0, -G.camY); drawWorld(); ctx.restore();
     ctx.restore();
     drawHud();
   }
   requestAnimationFrame(frame);
 }
 
-G = newRun();
+newRun();
 showMenu(null);
 requestAnimationFrame(frame);
 
-// tiny hook so the game can be driven from automated tests
-window.__dd = { get G() { return G; }, get st() { return ST; }, S, startRun, update: dt => update(dt) };
+// small hook so the game can be driven by automated tests
+window.__dd = { get G() { return G; }, get st() { return ST; }, S, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp };
 })();
 </script>
 </body>
