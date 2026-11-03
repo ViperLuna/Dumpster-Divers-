@@ -83,6 +83,7 @@ const GRAV = 1000;
 const HR = 15;                    // hobo collision radius
 const MAX_LV = 25;
 const CLONE_CAP = 6;
+const HAZARD_AFTER = 15;          // hazards (the things that bump you around) only appear after this many bounces
 const CLONE_HOPS = 2;             // times the dumpster's hole can bounce one clone back up
 const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
@@ -390,7 +391,7 @@ function spawnObject(prefill) {
   if (alt < 80) alt = 80 + rand(0, 260);
 
   const roll = Math.random();
-  const hz = clamp((alt - 600) / 1700, 0, .3), bs = clamp((alt - 300) / 1500, 0, .05);
+  const hz = G.catches >= HAZARD_AFTER ? clamp((alt - 600) / 1700, 0, .3) : 0, bs = clamp((alt - 300) / 1500, 0, .05);
   const o = { x: 0, y0: DTOP - alt, y: DTOP - alt, vx: 0, ph: rand(0, 6.28), bobF: rand(1.2, 2.6), bobA: rand(3, 8), age: 0, cd: 0 };
   if (!prefill && roll < hz) {
     const k = alt < 1100 ? 0 : alt < 2100 ? (Math.random() < .5 ? 0 : 1) : (Math.random() < .5 ? 1 : 2);
@@ -654,8 +655,9 @@ function update(dt) {
     }
   }
 
-  if (G.phase === 'jump' || G.phase === 'fly') steer(dt);
+  if (G.phase === 'fly') steer(dt);               // the dumpster holds still for the opening jump so he lands cleanly
   if (G.phase === 'jump') {
+    G.v = 0;
     G.jumpT += dt / .42;
     if (G.jumpT >= 1) {
       launch(0); G.inside = G.jumper; swapFlaps(); sfx.slam(); G.shake = .25; G.phase = 'fly';
