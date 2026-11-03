@@ -39,6 +39,7 @@
   button:active { transform:translateY(.15em); box-shadow:0 .05em 0 #a56a00; }
   button:disabled { background:#555a70; color:#aab; box-shadow:none; cursor:not-allowed; }
   .row button { min-width:4.8em; }
+  .row.prestige { background:rgba(255,207,74,.1); border:.12em solid rgba(255,207,74,.45); margin-top:.9em; }
   .go { display:block; width:100%; margin-top:.9em; font-size:1.5em; padding:.55em; background:#7dffa0; box-shadow:0 .2em 0 #2f8f4c; }
   .hint { margin-top:.8em; opacity:.7; font-size:.82em; line-height:1.4; }
   .reset { margin-top:.6em; background:none; box-shadow:none; color:#99a; font-weight:500; font-size:.75em; padding:.2em; text-decoration:underline; }
@@ -147,7 +148,14 @@ const BUILDUP = .82;                                   // each landing closes 18
 function launchFrac(streak) { return 1 - Math.pow(BUILDUP, streak); }
 function launchSpeed(streak) { return lerp(launchStart(S.height), launchMax(S.height), launchFrac(streak)); }
 
-const incomeMult = () => 1 + .25 * (S.prestige || 0);
+/* Prestige: pay money to be promoted. Upgrades and stash reset to zero; records and achievements stay.
+   Each rank is a permanent +25% income, so the next climb goes further than the last. */
+const MULT_STEP = .25;
+const RANKS = ['Dumpster Rookie', 'Trash Pro', 'Garbage Guru', 'Dumpster King', 'Alley Legend', 'Moon Hobo', 'Cosmic Hobo'];
+const rankName = n => RANKS[n] || `${RANKS[RANKS.length - 1]} ${n - RANKS.length + 2}`;
+const multAt = n => 1 + MULT_STEP * n;
+const incomeMult = () => multAt(S.prestige || 0);
+const prestigeCost = n => Math.round(25000 * Math.pow(4, n));
 const money = n => Math.floor(n).toLocaleString('en-US');
 
 /* ============================================================== zones */
@@ -1088,6 +1096,10 @@ function showMenu(res) {
         <div class="lv">Lv ${lv}/${u.max} · ${rowNote(u, lv)}</div></div>
         <button data-buy="${u.id}" ${maxed || S.cash < cost ? 'disabled' : ''}>${maxed ? 'MAX' : '$' + money(cost)}</button></div>`;
     }).join('')}
+    <div class="row prestige"><div class="nm"><b>⭐ Rank: ${rankName(S.prestige || 0)}</b>
+      <small>Income ×${multAt(S.prestige || 0).toFixed(2)} now. Prestige to become <b>${rankName((S.prestige || 0) + 1)}</b> (×${multAt((S.prestige || 0) + 1).toFixed(2)} forever).
+      Resets upgrades and stash to zero. Records stay.</small></div>
+      <button id="prestige" ${S.cash < prestigeCost(S.prestige || 0) ? 'disabled' : ''}>$${money(prestigeCost(S.prestige || 0))}</button></div>
     <button class="go" id="go">${first ? 'DIVE IN' : 'TRY AGAIN'}</button>
     <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>Land on the LEFT of the hole and the next hobo flies RIGHT.<br>Best haul $${money(S.bestCash)} · highest ${money(S.bestAlt)} m<br>Furthest zone: ${ZONES[S.bestZone || 0].name}${S.ach.leap ? ' · 🏆 One Giant Leap' : ''}</div>
     <button class="reset" id="reset">reset progress</button>`;
@@ -1096,6 +1108,16 @@ card.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   audio();
   if (b.id === 'go') { startRun(); return; }
+  if (b.id === 'prestige') {
+    const n = S.prestige || 0, cost = prestigeCost(n);
+    if (S.cash < cost) return;
+    if (confirm(`Prestige to ${rankName(n + 1)}?\n\nYou pay $${money(cost)}. Your upgrades and stash reset to zero, and your income becomes ×${multAt(n + 1).toFixed(2)} forever.\nRecords and achievements are kept.`)) {
+      for (const u of UPGRADES) S[u.id] = 0;
+      S.cash = 0; S.prestige = n + 1; S.zonesClaimed = [];
+      save(); sfx.leap(); showMenu(null);
+    }
+    return;
+  }
   if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, prestige: 0, muted: S.muted }; save(); showMenu(null); } return; }
   const id = b.dataset.buy; if (!id) return;
   const u = UPGRADES.find(x => x.id === id), cost = costOf(u);
@@ -1137,7 +1159,8 @@ showTitle();
 requestAnimationFrame(frame);
 
 // small hook so the game can be driven by automated tests
-window.__dd = { get G() { return G; }, get st() { return ST; }, S, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp };
+window.__dd = { get G() { return G; }, get st() { return ST; }, get S() { return S; }, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp,
+  setTarget: x => { target = x; keyDir = 0; }, showMenu, prestigeCost, launchSpeed, costOf, UPGRADES, newRun, begin };
 })();
 </script>
 </body>
