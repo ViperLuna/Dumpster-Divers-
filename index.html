@@ -115,15 +115,18 @@ try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } ca
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
 
 // Upgrades are deliberately small per level: you feel them after a few, not after one.
-// Each one has its own number of levels (max) and a price that grows smoothly from `base` to `top`.
+// Each one has its own number of levels (max) and a price that grows from `base` to `top`.
+// Prices were fitted with a simulated bot so the first cycle takes roughly: 10 min to 10% of the shop,
+// 3 h to 50%, ~30 h to 100%. The exponent COST_P < 1 front-loads the price a little, so the early game isn't instant.
+const COST_P = .45;
 const UPGRADES = [
-  { id: 'speed',  name: 'Dumpster Speed',  desc: 'Gets moving sooner and goes a bit faster',                  max: 60,  base: 8,  top: 600000 },
-  { id: 'height', name: 'Launch Height',   desc: 'Raises how high the bounces can build up to',               max: 100, base: 10, top: 5000000 },
-  { id: 'hole',   name: 'Bigger Dumpster', desc: 'A wider dumpster is easier to land in, but edge landings fling wilder', max: 40, base: 12, top: 300000 },
-  { id: 'rocket', name: 'Rocket Burn',     desc: 'Rockets burn longer. While one burns you smash anything in your way', max: 45, base: 15, top: 1000000 },
-  { id: 'net',    name: 'Safety Net',      desc: 'The net under the dumpster lasts longer',                   max: 40,  base: 10, top: 200000 },
+  { id: 'speed',  name: 'Dumpster Speed',  desc: 'Gets moving sooner and goes a bit faster',                  max: 60,  base: 35, top: 90000 },
+  { id: 'height', name: 'Launch Height',   desc: 'Raises how high the bounces can build up to',               max: 100, base: 50, top: 750000 },
+  { id: 'hole',   name: 'Bigger Dumpster', desc: 'A wider dumpster is easier to land in, but edge landings fling wilder', max: 40, base: 30, top: 45000 },
+  { id: 'rocket', name: 'Rocket Burn',     desc: 'Rockets burn longer. While one burns you smash anything in your way', max: 45, base: 45, top: 150000 },
+  { id: 'net',    name: 'Safety Net',      desc: 'The net under the dumpster lasts longer',                   max: 40,  base: 30, top: 30000 },
 ];
-const costOf = u => Math.round(u.base * Math.pow(u.top / u.base, S[u.id] / (u.max - 1)));
+const costOf = u => Math.round(u.base * Math.pow(u.top / u.base, Math.pow((S[u.id] || 0) / (u.max - 1), COST_P)));
 const burnOf = lv => .5 + .1 * lv;            // rocket burn seconds: 0.5 s -> 5.0 s over 45 upgrades
 const netOf  = lv => 10 + .5 * lv;            // safety net seconds: 10 s -> 30 s over 40 upgrades
 const THRUST_V = 900;                         // rocket climb speed (px/s); if you are already faster you keep your speed
@@ -155,7 +158,7 @@ const RANKS = ['Dumpster Rookie', 'Trash Pro', 'Garbage Guru', 'Dumpster King', 
 const rankName = n => RANKS[n] || `${RANKS[RANKS.length - 1]} ${n - RANKS.length + 2}`;
 const multAt = n => 1 + MULT_STEP * n;
 const incomeMult = () => multAt(S.prestige || 0);
-const prestigeCost = n => Math.round(25000 * Math.pow(4, n));
+const prestigeCost = n => Math.round(25000 * Math.pow(1.7, n));   // $25k for the first, then 1.7x each time
 const money = n => Math.floor(n).toLocaleString('en-US');
 
 /* ============================================================== zones */
@@ -293,8 +296,10 @@ const TIERS = [
   { lo: -200, hi: 650,  w: 100, glow: null },
   { lo: 0,    hi: 950,  w: 45,  glow: null },
   { lo: 280,  hi: 1450, w: 22,  glow: '#5ab8ff' },
-  { lo: 650,  hi: 2800, w: 9,   glow: '#b36bff' },
-  { lo: 1200, hi: 6000, w: 4,   glow: '#ffd23f' },
+  { lo: 650,  hi: 4000, w: 9,   glow: '#b36bff' },
+  { lo: 1200, hi: 12000, w: 4,  glow: '#ffd23f' },
+  { lo: 4500, hi: 1e9,  w: 3,   glow: '#ff6bd6' },      // space: no upper limit, so loot keeps getting better the higher you go
+  { lo: 20000, hi: 1e9, w: 2,   glow: '#6bfff0' },      // the moon and beyond
 ];
 const ITEMS = [
   [ { e: '🥫', v: 1 }, { e: '🍾', v: 2 } ],
@@ -302,6 +307,8 @@ const ITEMS = [
   [ { e: '🍕', v: 8 }, { e: '🍔', v: 9 }, { e: '🐦', v: 7, fast: true } ],
   [ { e: '💰', v: 20 }, { e: '📺', v: 24 } ],
   [ { e: '💎', v: 60 }, { e: '👑', v: 80 } ],
+  [ { e: '🌠', v: 150 }, { e: '🔮', v: 180 } ],
+  [ { e: '💠', v: 600 }, { e: '🏆', v: 800 } ],
 ];
 const PUS = [
   { id: 'wide',   e: '↔️', w: 24 },
@@ -457,13 +464,13 @@ function spawnObject(prefill) {
   const o = { x: 0, y0: DTOP - alt, y: DTOP - alt, vx: 0, ph: rand(0, 6.28), bobF: rand(1.2, 2.6), bobA: rand(3, 8), age: 0, cd: 0 };
   if (!prefill && roll < hz) {
     const hd = pick(ZONE_HAZ[zn]);
-    Object.assign(o, { kind: 'haz', e: hd.e, r: hd.r, tier: 6, vx: hd.slow ? rand(55, 100) : rand(80, 170) });
+    Object.assign(o, { kind: 'haz', e: hd.e, r: hd.r, tier: 9, vx: hd.slow ? rand(55, 100) : rand(80, 170) });
   } else if (!prefill && roll < hz + bs) {
-    Object.assign(o, { kind: 'boost', e: '🚀', r: 19, tier: 6, vx: rand(70, 120) });
+    Object.assign(o, { kind: 'boost', e: '🚀', r: 19, tier: 9, vx: rand(70, 120) });
   } else if (!prefill && roll < hz + bs + .085) {
     let tot = PUS.reduce((a, p) => a + p.w, 0), r = Math.random() * tot, p = PUS[0];
     for (const q of PUS) { if ((r -= q.w) <= 0) { p = q; break; } }
-    Object.assign(o, { kind: 'pu', id: p.id, e: p.e, r: 21, tier: 5, vx: rand(60, 100) });
+    Object.assign(o, { kind: 'pu', id: p.id, e: p.e, r: 21, tier: 8, vx: rand(60, 100) });
   } else {
     const t = pickTier(alt), it = pick(itemsFor(zn, t));
     Object.assign(o, { kind: 'item', e: it.e, v: it.v, tier: t, r: 15 + t, vx: it.fast ? rand(95, 150) : rand(45 + t * 12, 85 + t * 16) });
