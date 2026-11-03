@@ -109,7 +109,7 @@ const CLONE_PALS = [
 
 /* ============================================================== save data */
 const SAVE_KEY = 'dumpsterDivers.v3';
-let S = { cash: 0, speed: 0, height: 0, hole: 0, bestCash: 0, bestAlt: 0, muted: false };
+let S = { cash: 0, speed: 0, height: 0, hole: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, prestige: 0, muted: false };
 try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) {}
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
 
@@ -139,6 +139,21 @@ const BUILDUP = .82;                                   // each landing closes 18
 function launchFrac(streak) { return 1 - Math.pow(BUILDUP, streak); }
 function launchSpeed(streak) { return lerp(launchStart(S.height), launchMax(S.height), launchFrac(streak)); }
 
+const incomeMult = () => 1 + .25 * (S.prestige || 0);
+const money = n => Math.floor(n).toLocaleString('en-US');
+
+/* ============================================================== zones */
+// The sky changes as you climb. m = metres above the dumpster rim (10 px = 1 m).
+const ZONES = [
+  { name: 'The Alley',     m: 0,    bonus: 0 },
+  { name: 'The Clouds',    m: 50,   bonus: 400,    sub: 'The city is getting small' },
+  { name: 'The Upper Sky', m: 150,  bonus: 2500,   sub: 'Planes and choppers up here' },
+  { name: 'Space',         m: 500,  bonus: 15000,  sub: 'No air, no problem' },
+  { name: 'The Moon',      m: 3000, bonus: 100000, big: 'ONE GIANT LEAP', sub: 'Dumpster divers on the moon!' },
+];
+const zoneAt = altPx => { let z = 0; for (let i = 0; i < ZONES.length; i++) if (altPx / 10 >= ZONES[i].m) z = i; return z; };
+const MOON_R = 700, MOON_ALT = 30000 + MOON_R;       // the moon's bottom edge sits at 3,000 m
+
 /* ============================================================== canvas */
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
@@ -152,6 +167,20 @@ window.addEventListener('resize', resize); resize();
 /* ---- background: the alley (pre-rendered), a space gradient above it, and parallax stars */
 const bg = document.createElement('canvas'); bg.width = W * 2; bg.height = H * 2;
 const stars = document.createElement('canvas'); stars.width = W; stars.height = H;
+const moonImg = document.createElement('canvas'); moonImg.width = MOON_R * 2; moonImg.height = MOON_R * 2;
+(function paintMoon() {
+  const c = moonImg.getContext('2d'), R = MOON_R; let seed = 99; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const g = c.createRadialGradient(R * .8, R * .75, R * .1, R, R, R);
+  g.addColorStop(0, '#f4f1e6'); g.addColorStop(.7, '#cfccc0'); g.addColorStop(1, '#8d8b84');
+  c.fillStyle = g; c.beginPath(); c.arc(R, R, R, 0, 7); c.fill();
+  c.save(); c.beginPath(); c.arc(R, R, R, 0, 7); c.clip();
+  for (let i = 0; i < 60; i++) {
+    const r = 12 + rnd() * rnd() * 110, x = rnd() * R * 2, y = rnd() * R * 2;
+    c.fillStyle = 'rgba(90,88,80,.28)'; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 3; c.beginPath(); c.arc(x - r * .08, y - r * .08, r, Math.PI * .9, Math.PI * 1.7); c.stroke();
+  }
+  c.restore();
+})();
 (function paintBackground() {
   let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const c = bg.getContext('2d'); c.scale(2, 2);
@@ -230,6 +259,8 @@ const synth = {
   net()        { tone(220, .22, 'triangle', .1, 380); },
   clones()     { tone(400, .12, 'square', .06); tone(600, .12, 'square', .06, 0, .1); tone(800, .12, 'square', .06, 0, .2); },
   chute()      { tone(500, .3, 'sine', .07, -250); },
+  zone()       { tone(440, .12, 'triangle', .08); tone(660, .12, 'triangle', .08, 0, .1); tone(880, .3, 'triangle', .08, 0, .2); },
+  leap()       { for (let i = 0; i < 6; i++) tone(330 * Math.pow(1.26, i), .22, 'triangle', .09, 0, i * .11); tone(1320, .6, 'sine', .08, 0, .75); },
 };
 const sfx = {};
 for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](); };
@@ -262,11 +293,24 @@ const PUS = [
   { id: 'multi',  e: '👥', w: 8 },
   { id: 'chute',  e: '🪂', w: 20 },
 ];
-const HAZ = [
-  [ { e: '🦅' }, { e: '🪁' } ],
-  [ { e: '🚁' }, { e: '✈️' } ],
-  [ { e: '🛸' }, { e: '☄️' } ],
+// Zone flavour: extra loot mixed into each tier (zone -> tier -> items)
+const ZONE_ITEMS = [
+  {},
+  { 0: [{ e: '🎈', v: 2 }], 1: [{ e: '🧳', v: 4 }] },
+  { 1: [{ e: '📦', v: 4 }], 2: [{ e: '🍩', v: 9 }] },
+  { 0: [{ e: '🔩', v: 1 }], 1: [{ e: '🔋', v: 4 }], 3: [{ e: '🌟', v: 26 }, { e: '🪐', v: 30 }] },
+  { 0: [{ e: '🔩', v: 1 }], 2: [{ e: '🧀', v: 12 }], 3: [{ e: '👽', v: 28 }, { e: '🌟', v: 26 }] },
 ];
+const itemsFor = (zone, tier) => ITEMS[tier].concat((ZONE_ITEMS[zone] && ZONE_ITEMS[zone][tier]) || []);
+// Hazards (bumpers) per zone. Only the moon and beyond get the giant UFOs.
+const ZONE_HAZ = [
+  [],
+  [ { e: '🦅', r: 20 }, { e: '🪁', r: 20 } ],
+  [ { e: '🚁', r: 24 }, { e: '✈️', r: 24 } ],
+  [ { e: '☄️', r: 22 }, { e: '🛰️', r: 24 } ],
+  [ { e: '🛸', r: 44, slow: true } ],
+];
+const ZONE_HAZ_CHANCE = [0, .10, .14, .18, .22];
 function tierWeight(t, a) {
   const T = TIERS[t];
   let m;
@@ -300,7 +344,7 @@ function newRun() {
     jumper, inside: 1 - jumper, jumpT: 0,
     air: null, clones: [], cloneIdx: 0,
     objs: [], parts: [], floats: [], hudFloats: [], splats: [],
-    cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0,
+    cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0, zone: 0, banner: null, newAch: [],
     wideT: 0, netT: 0, saver: false, saverUsed: false,
     spawnT: 0, shake: 0, time: 0, overT: 0, slam: 0, deadWho: 0, camY: 0,
   };
@@ -391,11 +435,12 @@ function spawnObject(prefill) {
   if (alt < 80) alt = 80 + rand(0, 260);
 
   const roll = Math.random();
-  const hz = G.catches >= HAZARD_AFTER ? clamp((alt - 600) / 1700, 0, .3) : 0, bs = clamp((alt - 300) / 1500, 0, .05);
+  const zn = zoneAt(alt);
+  const hz = G.catches >= HAZARD_AFTER ? ZONE_HAZ_CHANCE[zn] : 0, bs = clamp((alt - 300) / 1500, 0, .05);
   const o = { x: 0, y0: DTOP - alt, y: DTOP - alt, vx: 0, ph: rand(0, 6.28), bobF: rand(1.2, 2.6), bobA: rand(3, 8), age: 0, cd: 0 };
   if (!prefill && roll < hz) {
-    const k = alt < 1100 ? 0 : alt < 2100 ? (Math.random() < .5 ? 0 : 1) : (Math.random() < .5 ? 1 : 2);
-    Object.assign(o, { kind: 'haz', e: pick(HAZ[Math.min(2, k + (alt > 1800 && Math.random() < .4 ? 1 : 0))]).e, r: 21, tier: 6, vx: rand(80, 170) });
+    const hd = pick(ZONE_HAZ[zn]);
+    Object.assign(o, { kind: 'haz', e: hd.e, r: hd.r, tier: 6, vx: hd.slow ? rand(55, 100) : rand(80, 170) });
   } else if (!prefill && roll < hz + bs) {
     Object.assign(o, { kind: 'boost', e: '🚀', r: 19, tier: 6, vx: rand(70, 120) });
   } else if (!prefill && roll < hz + bs + .085) {
@@ -403,7 +448,7 @@ function spawnObject(prefill) {
     for (const q of PUS) { if ((r -= q.w) <= 0) { p = q; break; } }
     Object.assign(o, { kind: 'pu', id: p.id, e: p.e, r: 21, tier: 5, vx: rand(60, 100) });
   } else {
-    const t = pickTier(alt), it = pick(ITEMS[t]);
+    const t = pickTier(alt), it = pick(itemsFor(zn, t));
     Object.assign(o, { kind: 'item', e: it.e, v: it.v, tier: t, r: 15 + t, vx: it.fast ? rand(95, 150) : rand(45 + t * 12, 85 + t * 16) });
     if (it.fast) o.bobA = 12;
   }
@@ -414,8 +459,9 @@ function spawnObject(prefill) {
 }
 
 /* ============================================================== power-ups */
+function earn(n) { const g = n * incomeMult(); G.cash += g; return g; }   // every payout goes through here so the prestige multiplier applies
 function dupBonus(x, y) {
-  G.cash += 5; floatText(x, y - 14, '+$5 already got one!', '#ffe27a'); hudFloat('+$5 bonus', '#ffe27a'); sfx.dup();
+  const g = Math.round(earn(5)); floatText(x, y - 14, `+$${g} already got one!`, '#ffe27a'); hudFloat(`+$${g} bonus`, '#ffe27a'); sfx.dup();
 }
 function spawnClones(h) {
   const n = Math.min(2, CLONE_CAP - G.clones.length);
@@ -468,8 +514,7 @@ function touchObjects(h, isMain) {
     const dx = o.x - h.x, dy = o.y - h.y, rr = HR + o.r - 4;
     if (dx * dx + dy * dy > rr * rr) continue;
     if (o.kind === 'item') {
-      const gain = o.v * (isMain ? multiplier() : 1);
-      G.cash += gain;
+      const gain = Math.round(earn(o.v * (isMain ? multiplier() : 1)));
       floatText(o.x, o.y - 10, `+$${gain}`, isMain ? '#7dffa0' : '#c8ffda');
       if (!isMain) hudFloat(`+$${gain}`, '#c8ffda');
       burst(o.x, o.y, 10, ['#ffe27a', '#fff', '#7dffa0'], 200, .5);
@@ -538,6 +583,18 @@ function steer(dt) {
   }
 }
 
+function enterZone(z) {
+  G.zone = z; const Z = ZONES[z];
+  S.bestZone = Math.max(S.bestZone || 0, z);
+  let bonus = 0;
+  if (!S.zonesClaimed.includes(z)) { S.zonesClaimed.push(z); bonus = Math.round(earn(Z.bonus)); }   // first visit this cycle pays a bonus
+  G.banner = { text: Z.big || Z.name.toUpperCase(), sub: Z.big ? Z.name + ' - ' + Z.sub : Z.sub, bonus, t: 0, big: !!Z.big };
+  if (Z.big && !S.ach.leap) { S.ach.leap = true; G.newAch.push('One Giant Leap'); }
+  (Z.big ? sfx.leap : sfx.zone)();
+  G.shake = Math.max(G.shake, Z.big ? .6 : .2);
+  burst(W / 2, G.air ? G.air.y : 0, Z.big ? 40 : 16, ['#ffe27a', '#fff', '#9ad8ff'], 300, .9);
+  save();
+}
 function updateMain(dt) {
   const a = G.air;
   const n = clamp(Math.ceil(Math.hypot(a.vx, a.vy) * dt / 18), 1, 16), h = dt / n;   // sub-steps: a fast hobo moves <= ~18px at a time
@@ -546,13 +603,14 @@ function updateMain(dt) {
     physics(a, h);
     touchObjects(a, true);
     G.maxAlt = Math.max(G.maxAlt, DTOP - a.y);
+    { const z = zoneAt(G.maxAlt); if (z > G.zone) enterZone(z); }
     const f = flap(), bottom = a.y + HR, level = DTOP - 6;
     if (!a.bonked && a.vy > 0 && bottom >= level && prevBottom <= level + 6) {
       const openC = flapCenter(opp(G.closed)), closedC = flapCenter(G.closed);
       const dh = wd(a.x, openC), dc = wd(a.x, closedC);
       if (Math.abs(dh) <= f / 2 + 6) {              // caught in the hole!
         G.streak++; G.catches++; G.bestStreak = Math.max(G.bestStreak, G.streak);
-        const m = multiplier(); G.cash += m; floatText(a.x, DTOP - 40, `+$${m}`, '#ffe27a');
+        const m = Math.round(earn(multiplier())); floatText(a.x, DTOP - 40, `+$${m}`, '#ffe27a');
         burst(a.x, DTOP - 6, 10, ['#fff', '#ffe27a'], 160, .4);
         const who = a.who;
         if (G.saverUsed) { G.saver = false; G.saverUsed = false; floatText(a.x, DTOP - 66, 'SAVER USED', '#ffb347'); }
@@ -608,6 +666,7 @@ function update(dt) {
   G.time += dt;
   for (const s of ['L', 'R']) G.lid[s] += ((s === G.closed ? 0 : 1) - G.lid[s]) * Math.min(1, dt * 11);
   G.slam = Math.max(0, G.slam - dt); G.shake = Math.max(0, G.shake - dt * 3);
+  if (G.banner) { G.banner.t += dt; if (G.banner.t > (G.banner.big ? 4.5 : 3)) G.banner = null; }
   G.wideT = Math.max(0, G.wideT - dt); G.netT = Math.max(0, G.netT - dt);
   G.dw += (targetDw() - G.dw) * Math.min(1, dt * 6);
 
@@ -668,11 +727,11 @@ function update(dt) {
 
 function endRun() {
   G.phase = 'over';
-  S.cash += G.cash;
-  const newBest = G.cash > S.bestCash; if (newBest) S.bestCash = G.cash;
+  S.cash += Math.floor(G.cash);
+  const newBest = Math.floor(G.cash) > S.bestCash; if (newBest) S.bestCash = Math.floor(G.cash);
   const peak = Math.round(G.maxAlt / 10), newPeak = peak > S.bestAlt; if (newPeak) S.bestAlt = peak;
   save();
-  showMenu({ cash: G.cash, catches: G.catches, streak: G.bestStreak, peak, who: HOBOS[G.deadWho].name, newBest, newPeak });
+  showMenu({ cash: Math.floor(G.cash), catches: G.catches, streak: G.bestStreak, peak, who: HOBOS[G.deadWho].name, newBest, newPeak, zone: G.zone, ach: G.newAch });
 }
 
 /* ============================================================== hobo sprite */
@@ -797,20 +856,44 @@ function drawHoboFlying(h, pal, sc) {
   drawHobo(h.x, h.y, h.chute === 'open' ? rot * .3 : rot, h.t + (h.who || 0), pal, 'fly', sc, h.chute);
 }
 
-function drawWorld() {
-  ctx.fillStyle = '#010208'; ctx.fillRect(-10, G.camY - 10, W + 20, H + 20);   // always repaint the visible area
-  // sky above the alley darkens toward space
-  const sg = ctx.createLinearGradient(0, -9000, 0, 0);
-  sg.addColorStop(0, '#010208'); sg.addColorStop(1, '#0b0e2c');
-  ctx.fillStyle = sg; ctx.fillRect(0, -9000, W, 9000 + 4);
-  const altShade = clamp(-G.camY / 900, 0, 1);
-  if (altShade > 0) {                               // parallax stars, drawn in screen space behind the alley
-    ctx.save(); ctx.translate(0, G.camY);
-    const off = (-G.camY * .3) % H, off2 = (-G.camY * .12) % H;          // two layers = depth; both tile forever
-    ctx.globalAlpha = altShade * .45; ctx.drawImage(stars, 0, off2, W, H); ctx.drawImage(stars, 0, off2 - H, W, H);
-    ctx.globalAlpha = altShade; ctx.drawImage(stars, 0, off, W, H); ctx.drawImage(stars, 0, off - H, W, H);
+const hash01 = k => { const v = Math.sin(k * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+/* soft drifting clouds, placed by a hash so they are the same every time; they live between ~70 m and ~300 m */
+function drawClouds(altBot, altTop) {
+  const BAND = 120, a0 = Math.max(700, altBot - 120), a1 = Math.min(3200, altTop + 120);
+  for (let k = Math.floor(a0 / BAND); k <= Math.floor(a1 / BAND); k++) {
+    const h1 = hash01(k), h2 = hash01(k + 91), h3 = hash01(k + 313);
+    if (h1 < .35) continue;
+    const alt = k * BAND + h2 * BAND, y = DTOP - alt;
+    const fade = clamp((alt - 700) / 300, 0, 1) * clamp((3200 - alt) / 500, 0, 1);
+    const sp = (h3 - .5) * 26, x = (((h1 * 1000 + sp * G.time) % (W + 320)) + (W + 320)) % (W + 320) - 160, s = .8 + h3 * 1.3;
+    ctx.save(); ctx.globalAlpha = .5 * fade; ctx.fillStyle = '#eef3ff';
+    ctx.beginPath();                                // moveTo before each puff, so they are separate shapes (no wedge between them)
+    for (const [dx, dy, rx, ry] of [[0, 0, 54, 17], [-34, 5, 36, 14], [36, 4, 40, 15], [4, -12, 32, 15]]) {
+      ctx.moveTo(x + (dx + rx) * s, y + dy * s); ctx.ellipse(x + dx * s, y + dy * s, rx * s, ry * s, 0, 0, 7);
+    }
+    ctx.fill();
     ctx.restore();
   }
+}
+function drawWorld() {
+  ctx.fillStyle = '#010208'; ctx.fillRect(-10, G.camY - 10, W + 20, H + 20);   // always repaint the visible area
+  // the sky changes colour with altitude: night city -> bright upper sky -> deep blue -> black space
+  const SKY_H = 12000, sg = ctx.createLinearGradient(0, -SKY_H, 0, 0);
+  for (const [alt, col] of [[12000, '#010208'], [8000, '#04061a'], [5000, '#0e1a4a'], [3000, '#2a4a95'], [1500, '#3a63b5'], [500, '#1f2f7a'], [0, '#0b0e2c']])
+    sg.addColorStop(1 - alt / SKY_H, col);
+  ctx.fillStyle = sg; ctx.fillRect(0, -SKY_H, W, SKY_H + 4);
+  const altC = Math.max(0, DTOP - G.camY - H / 2), starA = clamp((altC - 3000) / 4500, 0, 1);
+  if (starA > 0) {                                  // parallax stars, drawn in screen space; both layers tile forever
+    ctx.save(); ctx.translate(0, G.camY);
+    const off = (-G.camY * .3) % H, off2 = (-G.camY * .12) % H;
+    ctx.globalAlpha = starA * .45; ctx.drawImage(stars, 0, off2, W, H); ctx.drawImage(stars, 0, off2 - H, W, H);
+    ctx.globalAlpha = starA; ctx.drawImage(stars, 0, off, W, H); ctx.drawImage(stars, 0, off - H, W, H);
+    ctx.restore();
+  }
+  const altTop = DTOP - G.camY, altBot = altTop - H;
+  if (altTop > MOON_ALT - MOON_R - 100 && altBot < MOON_ALT + MOON_R + 100)       // the moon: a huge disc whose bottom edge is at 3,000 m
+    ctx.drawImage(moonImg, W / 2 - MOON_R, DTOP - MOON_ALT - MOON_R);
+  if (altTop > 600 && altBot < 3200) drawClouds(altBot, altTop);
   ctx.drawImage(bg, 0, 0, W, H);
 
   // pooled objects: junk by rarity (rarer on top), then power-ups, then bumpers
@@ -874,7 +957,7 @@ function hudText(txt, x, y, size, col, align = 'left') {
   ctx.strokeText(txt, x, y); ctx.fillStyle = col; ctx.fillText(txt, x, y);
 }
 function drawHud() {
-  hudText(`$${G.cash}`, 14, 38, 32, '#7dffa0');
+  hudText(`$${money(G.cash)}`, 14, 38, G.cash >= 1e6 ? 26 : 32, '#7dffa0');
   let hy = 62;
   for (const f of G.hudFloats) { ctx.globalAlpha = clamp(f.life, 0, 1); hudText(f.txt, 16, hy, 16, f.col); hy += 18; }
   ctx.globalAlpha = 1;
@@ -894,7 +977,8 @@ function drawHud() {
     const m = multiplier();
     hudText(`${G.streak} bounce${G.streak === 1 ? '' : 's'}${m > 1 ? `  ×${m}` : ''}`, W / 2 + 14, 32, 20, '#ffe27a', 'center');
     const alt = Math.round(Math.max(0, DTOP - (G.air ? G.air.y : DTOP)) / 10);
-    if (G.maxAlt > 40) hudText(`${Math.round(G.maxAlt / 10)} m peak`, W / 2 + 14, 54, 14, 'rgba(255,255,255,.8)', 'center');
+    if (G.maxAlt > 40) hudText(`${money(G.maxAlt / 10)} m peak`, W / 2 + 14, 54, 14, 'rgba(255,255,255,.8)', 'center');
+    if (G.zone > 0) hudText(ZONES[G.zone].name, W / 2 + 14, 96, 12, '#9ad8ff', 'center');
     // launch power: fills as bounces build up toward this level's ceiling
     const pf = launchFrac(G.streak), bx = W / 2 - 31, by = 62;
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(bx, by, 90, 7);
@@ -911,6 +995,16 @@ function drawHud() {
     ctx.beginPath(); ctx.moveTo(hc - f / 2 + 4, y); ctx.lineTo(hc + f / 2 - 4, y); ctx.stroke();
     ctx.strokeStyle = '#ffcf4a'; ctx.lineWidth = 9;
     ctx.beginPath(); ctx.moveTo(hc - f / 2 + 4, y); ctx.lineTo(hc + f / 2 - 4, y); ctx.stroke();
+    ctx.restore();
+  }
+  if (G.banner) {                                   // zone banner: pops in, holds, fades out
+    const b = G.banner, dur = b.big ? 4.5 : 3, a = Math.min(1, b.t / .25, (dur - b.t) / .7), pop = 1 + Math.max(0, .35 - b.t) * 1.2;
+    ctx.save(); ctx.globalAlpha = clamp(a, 0, 1); ctx.translate(W / 2, b.big ? 250 : 215); ctx.scale(pop, pop);
+    if (b.big) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(-W / 2, -48, W, 150); }
+    hudText(b.text, 0, 0, b.big ? 44 : 34, b.big ? '#ffe27a' : '#fff', 'center');
+    hudText(b.sub, 0, 30, 16, '#9ad8ff', 'center');
+    if (b.bonus) hudText(`ZONE BONUS  +$${money(b.bonus)}`, 0, 62, 22, '#7dffa0', 'center');
+    if (b.big) hudText('ACHIEVEMENT UNLOCKED', 0, 90, 14, '#ffb347', 'center');
     ctx.restore();
   }
   if (G.phase === 'ready' && !menuOpen) {
@@ -951,25 +1045,26 @@ function showMenu(res) {
     <h1>DUMPSTER DIVERS</h1>
     <p class="sub">${first ? 'Gutter Gary &amp; Dumpy Dave want that trash. Bounce them, grab stuff, don’t hit the pavement.' : 'Another one bites the asphalt.'}</p>
     ${res ? `<div class="result"><b>${res.who}</b> got flattened.<br>
-      Earned <b>$${res.cash}</b> · ${res.catches} bounce${res.catches === 1 ? '' : 's'} · best streak ${res.streak}<br>
-      Peak <b>${res.peak} m</b>${res.newPeak ? ' <b>(new high!)</b>' : ''}${res.newBest ? ' · <b>best haul!</b>' : ''}</div>` : ''}
-    <div class="cash">Stash: <span>$${S.cash}</span></div>
+      Earned <b>$${money(res.cash)}</b> · ${res.catches} bounce${res.catches === 1 ? '' : 's'} · best streak ${res.streak}<br>
+      Peak <b>${money(res.peak)} m</b>${res.newPeak ? ' <b>(new high!)</b>' : ''}${res.newBest ? ' · <b>best haul!</b>' : ''}<br>
+      Reached <b>${ZONES[res.zone || 0].name}</b>${(res.ach || []).map(a => `<br>🏆 <b>ACHIEVEMENT: ${a}</b>`).join('')}</div>` : ''}
+    <div class="cash">Stash: <span>$${money(S.cash)}</span></div>
     ${UPGRADES.map(u => {
       const lv = S[u.id], maxed = lv >= MAX_LV, cost = costOf(u);
       return `<div class="row"><div class="nm"><b>${u.name}</b><small>${u.desc}</small>
         <div class="bar"><i style="width:${lv / MAX_LV * 100}%"></i></div>
         <div class="lv">Lv ${lv}/${MAX_LV} · ${rowNote(u, lv)}</div></div>
-        <button data-buy="${u.id}" ${maxed || S.cash < cost ? 'disabled' : ''}>${maxed ? 'MAX' : '$' + cost}</button></div>`;
+        <button data-buy="${u.id}" ${maxed || S.cash < cost ? 'disabled' : ''}>${maxed ? 'MAX' : '$' + money(cost)}</button></div>`;
     }).join('')}
     <button class="go" id="go">${first ? 'DIVE IN' : 'TRY AGAIN'}</button>
-    <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>Land on the LEFT of the hole and the next hobo flies RIGHT.<br>Best haul $${S.bestCash} · highest ${S.bestAlt} m</div>
+    <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>Land on the LEFT of the hole and the next hobo flies RIGHT.<br>Best haul $${money(S.bestCash)} · highest ${money(S.bestAlt)} m<br>Furthest zone: ${ZONES[S.bestZone || 0].name}${S.ach.leap ? ' · 🏆 One Giant Leap' : ''}</div>
     <button class="reset" id="reset">reset progress</button>`;
 }
 card.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   audio();
   if (b.id === 'go') { startRun(); return; }
-  if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, hole: 0, bestCash: 0, bestAlt: 0, muted: S.muted }; save(); showMenu(null); } return; }
+  if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, hole: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, prestige: 0, muted: S.muted }; save(); showMenu(null); } return; }
   const id = b.dataset.buy; if (!id) return;
   const u = UPGRADES.find(x => x.id === id), cost = costOf(u);
   if (S[id] < MAX_LV && S.cash >= cost) {
