@@ -132,7 +132,7 @@ const UPGRADES = [
 const costOf = u => Math.round(u.base * Math.pow(u.top / u.base, Math.pow((S[u.id] || 0) / (u.max - 1), COST_P)));
 const burnOf = lv => .5 + .1 * lv;            // rocket burn seconds: 0.5 s -> 5.0 s over 45 upgrades
 const netOf  = lv => 10 + .5 * lv;            // safety net seconds: 10 s -> 30 s over 40 upgrades
-const turboOf = lv => 10 + .5 * lv;           // turbo dumpster seconds: 10 s -> 30 s over 40 upgrades
+const turboOf = lv => 5 + .25 * lv;           // turbo dumpster seconds: 5 s -> 15 s over 40 upgrades
 const THRUST_V = 900;                         // rocket climb speed (px/s); if you are already faster you keep your speed
 
 function stats() {
