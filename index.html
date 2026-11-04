@@ -292,14 +292,25 @@ for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](
 
 /* Rocket fire loop: one sound file (made for the longest, 5 s burn) that starts when a burn starts and is cut with a
    very short fade the moment the burn ends, however early that is. Drop the file in as  sounds/thrust.mp3 . */
-let thrustA = null, thrustOn = false, thrustFade = null;
+let thrustA = null, thrustOn = false, thrustFade = null, thrustFocus = null, thrustSerial = -1;
 fetch('sounds/thrust.mp3', { method: 'HEAD' }).then(r => { if (r.ok && !SOUNDS.thrust) SOUNDS.thrust = 'sounds/thrust.mp3'; }).catch(() => {});
-function startThrustSound() {                         // a rocket pickup always (re)starts it, because the burn timer is refreshed too
+function startThrustSound(offset = 0) {               // offset = seconds already burned, so a late join stays in sync with the burn
   const url = SOUNDS.thrust; if (!url || S.muted) return;
   if (!thrustA || thrustA._url !== url) { thrustA = new Audio(url); thrustA._url = url; }
   clearInterval(thrustFade); thrustA.volume = .85;
-  try { thrustA.currentTime = 0; } catch (e) {}
+  try { thrustA.currentTime = Math.max(0, offset); } catch (e) {}
   thrustA.play().catch(() => {}); thrustOn = true;
+}
+/* The fire sound follows whichever hobo the camera is on: the main hobo, or after he splats, the focused clone.
+   It (re)starts on a rocket pickup, joins mid-burn if the camera switches to a clone that is already burning, and stops when that burn ends. */
+function updateThrustSound() {
+  const focus = !G || menuOpen || paused ? null : (G.air || (G.phase === 'dead' ? G.camClone : null));
+  if (focus && focus.thrust > 0) {
+    if (!thrustOn || thrustFocus !== focus || thrustSerial !== focus.rocketId) {
+      thrustFocus = focus; thrustSerial = focus.rocketId;
+      startThrustSound((focus.thrustMax || 0) - focus.thrust);
+    }
+  } else if (thrustOn) { thrustFocus = null; stopThrustSound(); }
 }
 function stopThrustSound() {
   if (!thrustOn) return; thrustOn = false;
@@ -591,7 +602,7 @@ function touchObjects(h, isMain) {
       h.thrust = Math.max(h.thrust || 0, ST.burn);
       if (h.vy > -THRUST_V) h.vy = -THRUST_V;
       h.chute = null;
-      if (isMain) startThrustSound();                           // clones burn silently so they don't pile on top of the main hobo's sound
+      h.rocketId = (h.rocketId || 0) + 1; h.thrustMax = h.thrust;   // (the fire sound only plays for the hobo the camera is following)
       burst(o.x, o.y, 14, ['#ff9a4a', '#fff', '#ffe27a'], 240, .5); sfx.boost();
       floatText(o.x, o.y - 14, 'ROCKET!', '#ff9a4a');
       G.objs.splice(i, 1);
@@ -1227,7 +1238,7 @@ function startRun() {
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(.033, (now - last) / 1000); last = now;
-  if (thrustOn && (menuOpen || paused || !G || !(G.air && G.air.thrust > 0))) stopThrustSound();   // burn over (or menu/pause/death): cut the sound
+  updateThrustSound();
   if (G) {
     if (!menuOpen && !paused) update(dt);
     else if (menuOpen) {                                 // idle animation behind the menu
