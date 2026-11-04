@@ -496,11 +496,13 @@ function dupBonus(x, y) {
 function spawnClones(h) {
   const n = Math.min(2, CLONE_CAP - G.clones.length);
   if (n <= 0) return false;
+  G.lastSpawned = [];
   for (let i = 0; i < n; i++) {
     const dir = (n === 1 ? (Math.random() < .5 ? -1 : 1) : (i === 0 ? -1 : 1));
     // every clone shoots UP with a decent launch (about 70-95% of a normal launch), whatever the parent was doing
-    G.clones.push({ x: h.x, y: h.y, vx: dir * rand(150, 230) + h.vx * .2, vy: -launchSpeed(G.streak) * rand(.7, .95), t: 0, cd: 0,
-                    gs: CLONE_GRAVITY, chute: null, pal: CLONE_PALS[G.cloneIdx++ % CLONE_PALS.length] });
+    const c = { x: h.x, y: h.y, vx: dir * rand(150, 230) + h.vx * .2, vy: -launchSpeed(G.streak) * rand(.7, .95), t: 0, cd: 0,
+                gs: CLONE_GRAVITY, chute: null, pal: CLONE_PALS[G.cloneIdx++ % CLONE_PALS.length] };
+    G.clones.push(c); G.lastSpawned.push(c);
   }
   burst(h.x, h.y, 14, ['#fff', '#ffe27a', '#ff9a7a'], 240, .5); sfx.clones();
   return true;
@@ -523,7 +525,11 @@ function applyPowerUp(id, h, isMain, ox, oy) {
       if (h.chute) dupBonus(ox, oy); else { h.chute = h.vy > 0 ? 'open' : 'armed'; floatText(ox, oy - 14, 'PARACHUTE!', '#9ad8ff'); sfx.chute(); }
       break;
     case 'multi':
-      if (!spawnClones(h)) dupBonus(ox, oy); else floatText(ox, oy - 14, 'MORE HOBOS!', '#9ad8ff');
+      if (!spawnClones(h)) dupBonus(ox, oy);
+      else {
+        floatText(ox, oy - 14, 'MORE HOBOS!', '#9ad8ff');
+        if (!isMain && G.phase === 'dead') G.camClone = G.lastSpawned[G.lastSpawned.length - 1];   // a clone caught a capsule: the camera jumps to one of its new clones
+      }
       break;
   }
 }
@@ -695,7 +701,7 @@ function groundHit(a) {
   G.splats.push({ x: a.x, t: 0, pal: HOBOS[a.who].pal, big: true });
   burst(a.x, GROUND - 6, 22, ['#ffe27a', '#fff', '#ff9a7a', '#8fd0ff'], 320, .8);
   G.shake = 1; sfx.splat();
-  G.deadWho = a.who; G.air = null; G.phase = 'dead'; G.overT = 1.5;
+  G.deadWho = a.who; G.air = null; G.phase = 'dead'; G.overT = 1.5; G.camClone = null;
 }
 
 /* Clones can use the dumpster too: the closed flap bounces them off, and the open hole throws them back up
@@ -736,7 +742,15 @@ function update(dt) {
   // camera follows the airborne hobo up and back down
   // the camera follows the main hobo; once he has splatted but clones are still up, it follows the lowest clone instead
   let follow = G.air;
-  if (!follow && G.phase === 'dead' && G.clones.length) follow = G.clones.reduce((a, c) => (c.y > a.y ? c : a));
+  if (!follow && G.phase === 'dead' && G.clones.length) {
+    // stay on one clone until it lands; then pick the highest remaining (the newest, if they are level)
+    if (!G.camClone || !G.clones.includes(G.camClone)) {
+      let best = G.clones[0];
+      for (const c of G.clones) if (c.y < best.y - 1 || Math.abs(c.y - best.y) <= 1) best = c;
+      G.camClone = best;
+    }
+    follow = G.camClone;
+  }
   const camTarget = follow ? Math.min(0, follow.y - 330) : 0;
   const camK = clamp(9 + (follow ? Math.abs(follow.vy) / 150 : 0), 9, 30);   // tighter follow when he is flying fast
   G.camY += (camTarget - G.camY) * Math.min(1, dt * camK);
