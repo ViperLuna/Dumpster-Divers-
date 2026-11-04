@@ -88,6 +88,8 @@ const HAZARD_AFTER = 15;          // hazards (the things that bump you around) o
 const CLONE_HOPS = 2;             // times the dumpster's hole can bounce one clone back up
 const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
+const TURBO_KEY_V = 900;          // turbo: arrow-key speed in px/s (about half a second to cross the screen)
+const TURBO_SLIDE = 4500;         // turbo: how fast the dumpster slides to the cursor/finger (px/s), i.e. near-instant
 const FLING = 4;                  // launch sideways speed per px landed off-centre
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -316,6 +318,7 @@ const PUS = [
   { id: 'saver',  e: '🛡️', w: 22 },
   { id: 'multi',  e: '👥', w: 8 },
   { id: 'chute',  e: '🪂', w: 20 },
+  { id: 'turbo',  e: '⚡', w: 9 },
 ];
 // Zone flavour: extra loot mixed into each tier (zone -> tier -> items)
 const ZONE_ITEMS = [
@@ -369,7 +372,7 @@ function newRun() {
     air: null, clones: [], cloneIdx: 0,
     objs: [], parts: [], floats: [], hudFloats: [], splats: [],
     cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0, zone: 0, banner: null, newAch: [],
-    wideT: 0, netT: 0, saver: false, saverUsed: false,
+    wideT: 0, netT: 0, turboT: 0, saver: false, saverUsed: false,
     spawnT: 0, shake: 0, time: 0, overT: 0, slam: 0, deadWho: 0, camY: 0,
   };
   run.lid[run.closed] = 0; run.lid[opp(run.closed)] = 1;
@@ -507,6 +510,9 @@ function applyPowerUp(id, h, isMain, ox, oy) {
     case 'net':
       if (G.netT > 0) dupBonus(ox, oy); else { floatText(ox, oy - 14, 'SAFETY NET!', '#9ad8ff'); sfx.powerup(); }
       G.netT = ST.netTime; break;
+    case 'turbo':
+      if (G.turboT > 0) dupBonus(ox, oy); else { floatText(ox, oy - 14, 'TURBO DUMPSTER!', '#ffe27a'); sfx.powerup(); }
+      G.turboT = PU_TIME; break;
     case 'saver':
       if (G.saver) dupBonus(ox, oy); else { G.saver = true; floatText(ox, oy - 14, 'COMBO SAVER!', '#9ad8ff'); sfx.powerup(); }
       break;
@@ -598,19 +604,31 @@ function swapFlaps() { G.closed = opp(G.closed); }
 
 function steer(dt) {
   const f = flap(), open = opp(G.closed), off = open === 'L' ? -f / 2 : f / 2;
-  let vDes = 0;
-  if (keyDir) vDes = keyDir * ST.maxV;
-  else if (target != null) {
-    const d = (target - off) - G.x;              // the cursor positions the HOLE, not the dumpster centre
-    vDes = Math.sign(d) * Math.min(ST.maxV, Math.sqrt(2 * ST.decel * Math.abs(d)) * .9);
-    if (Math.abs(d) < 2) vDes = 0;
+  if (G.turboT > 0) {
+    // TURBO: no slow start. Arrows go straight to full speed and stop the instant you let go;
+    // a cursor or finger gets a near-instant slide (about a tenth of a second across the screen).
+    if (keyDir) G.v = keyDir * TURBO_KEY_V;
+    else if (target != null) {
+      const want = validX(target - off, G.closed, f);                  // aim only at spots where the whole hole stays on screen
+      const d = want - G.x; G.v = clamp(d, -TURBO_SLIDE * dt, TURBO_SLIDE * dt) / dt;
+    }
+    else G.v = 0;
+    G.x += G.v * dt;
+  } else {
+    let vDes = 0;
+    if (keyDir) vDes = keyDir * ST.maxV;
+    else if (target != null) {
+      const d = (target - off) - G.x;              // the cursor positions the HOLE, not the dumpster centre
+      vDes = Math.sign(d) * Math.min(ST.maxV, Math.sqrt(2 * ST.decel * Math.abs(d)) * .9);
+      if (Math.abs(d) < 2) vDes = 0;
+    }
+    const dv = vDes - G.v;
+    const braking = G.v !== 0 && Math.sign(dv) !== Math.sign(G.v);
+    const rate = braking ? ST.decel : ST.accel;
+    G.v += clamp(dv, -rate * dt, rate * dt);
+    if (!keyDir && target != null && Math.abs((target - off) - G.x) < 3 && Math.abs(G.v) < 30) G.v = 0;
+    G.x += G.v * dt;
   }
-  const dv = vDes - G.v;
-  const braking = G.v !== 0 && Math.sign(dv) !== Math.sign(G.v);
-  const rate = braking ? ST.decel : ST.accel;
-  G.v += clamp(dv, -rate * dt, rate * dt);
-  if (!keyDir && target != null && Math.abs((target - off) - G.x) < 3 && Math.abs(G.v) < 30) G.v = 0;
-  G.x += G.v * dt;
   const vx = validX(G.x, G.closed, f);
   if (vx !== G.x) {
     const diff = vx - G.x;
@@ -704,6 +722,12 @@ function update(dt) {
   G.slam = Math.max(0, G.slam - dt); G.shake = Math.max(0, G.shake - dt * 3);
   if (G.banner) { G.banner.t += dt; if (G.banner.t > (G.banner.big ? 4.5 : 3)) G.banner = null; }
   G.wideT = Math.max(0, G.wideT - dt); G.netT = Math.max(0, G.netT - dt);
+  if (G.turboT > 0) {
+    G.turboT -= dt;
+    if (G.turboT <= 0) { G.turboT = 0; G.v = clamp(G.v, -ST.maxV, ST.maxV); }     // back to the slow, heavy dumpster
+    else if (G.parts.length < 400 && Math.random() < .6)                         // sparks fly off while it is on
+      G.parts.push({ x: G.x + rand(-G.dw / 2, G.dw / 2), y: DTOP + rand(0, 60), vx: rand(-60, 60) - G.v * .15, vy: rand(-220, -60), life: .4, max: .4, c: pick(['#ffe27a', '#fff', '#9ad8ff']), s: rand(2, 4) });
+  }
   G.dw += (targetDw() - G.dw) * Math.min(1, dt * 6);
 
   // camera follows the airborne hobo up and back down
@@ -971,6 +995,14 @@ function drawWorld() {
   }
   // dumpster (drawn at every wrapped copy that touches the screen)
   const xs = copies(G.x, G.dw / 2 + 14);
+  if (G.turboT > 0) {                               // electric glow under the dumpster while turbo is on
+    const gl = .4 + Math.sin(G.time * 14) * .12, fade = Math.min(1, G.turboT / .8);
+    for (const xx of xs) {
+      const g = ctx.createRadialGradient(xx, DTOP + 34, 6, xx, DTOP + 34, G.dw * .95);
+      g.addColorStop(0, `rgba(255,236,120,${gl * fade})`); g.addColorStop(1, 'rgba(255,236,120,0)');
+      ctx.fillStyle = g; ctx.fillRect(xx - G.dw, DTOP - G.dw * .6, G.dw * 2, G.dw * 1.6);
+    }
+  }
   for (const xx of xs) drawDumpsterAt(xx);
   if (G.phase === 'ready') {
     const bob = Math.sin(G.time * 3) * 1.2;
@@ -1012,6 +1044,7 @@ function drawHud() {
     ctx.fillStyle = col; ctx.fillRect(40, py + 5, 70 * clamp(frac, 0, 1), 8); py += 24;
   };
   if (G.wideT > 0) bar('↔️', G.wideT / PU_TIME, '#9ad8ff');
+  if (G.turboT > 0) bar('⚡', G.turboT / PU_TIME, '#ffe27a');
   if (G.netT > 0) bar('🥅', G.netT / ST.netTime, '#9ad8ff');
   if (G.air && G.air.thrust > 0) bar('🚀', G.air.thrust / ST.burn, '#ff9a4a');
   if (G.saver) bar('🛡️', 1, G.saverUsed && Math.floor(G.time * 6) % 2 ? '#ffb347' : '#ffe27a');
