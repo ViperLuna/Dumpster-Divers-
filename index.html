@@ -289,9 +289,26 @@ const synth = {
 };
 const sfx = {};
 for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](); };
+
+/* Rocket fire loop: one sound file (made for the longest, 5 s burn) that starts when a burn starts and is cut with a
+   very short fade the moment the burn ends, however early that is. Drop the file in as  sounds/thrust.mp3 . */
+let thrustA = null, thrustOn = false, thrustFade = null;
+fetch('sounds/thrust.mp3', { method: 'HEAD' }).then(r => { if (r.ok && !SOUNDS.thrust) SOUNDS.thrust = 'sounds/thrust.mp3'; }).catch(() => {});
+function startThrustSound() {                         // a rocket pickup always (re)starts it, because the burn timer is refreshed too
+  const url = SOUNDS.thrust; if (!url || S.muted) return;
+  if (!thrustA || thrustA._url !== url) { thrustA = new Audio(url); thrustA._url = url; }
+  clearInterval(thrustFade); thrustA.volume = .85;
+  try { thrustA.currentTime = 0; } catch (e) {}
+  thrustA.play().catch(() => {}); thrustOn = true;
+}
+function stopThrustSound() {
+  if (!thrustOn) return; thrustOn = false;
+  const a = thrustA; let v = a.volume; clearInterval(thrustFade);
+  thrustFade = setInterval(() => { v -= .2; if (v <= 0) { clearInterval(thrustFade); a.pause(); a.volume = .85; } else a.volume = v; }, 16);
+}
 const muteBtn = document.getElementById('mute');
 function paintMute() { muteBtn.textContent = S.muted ? '🔇' : '🔊'; }
-muteBtn.addEventListener('click', e => { e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio(); });
+muteBtn.addEventListener('click', e => { e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio(); if (S.muted) stopThrustSound(); });
 paintMute();
 
 /* ============================================================== loot tables */
@@ -574,6 +591,7 @@ function touchObjects(h, isMain) {
       h.thrust = Math.max(h.thrust || 0, ST.burn);
       if (h.vy > -THRUST_V) h.vy = -THRUST_V;
       h.chute = null;
+      if (isMain) startThrustSound();                           // clones burn silently so they don't pile on top of the main hobo's sound
       burst(o.x, o.y, 14, ['#ff9a4a', '#fff', '#ffe27a'], 240, .5); sfx.boost();
       floatText(o.x, o.y - 14, 'ROCKET!', '#ff9a4a');
       G.objs.splice(i, 1);
@@ -1209,6 +1227,7 @@ function startRun() {
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(.033, (now - last) / 1000); last = now;
+  if (thrustOn && (menuOpen || paused || !G || !(G.air && G.air.thrust > 0))) stopThrustSound();   // burn over (or menu/pause/death): cut the sound
   if (G) {
     if (!menuOpen && !paused) update(dt);
     else if (menuOpen) {                                 // idle animation behind the menu
@@ -1233,7 +1252,7 @@ showTitle();
 requestAnimationFrame(frame);
 
 // small hook so the game can be driven by automated tests
-window.__dd = { get G() { return G; }, get st() { return ST; }, get S() { return S; }, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp,
+window.__dd = { get G() { return G; }, get st() { return ST; }, get S() { return S; }, SOUNDS, get thrustAudio() { return thrustA; }, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp,
   setTarget: x => { target = x; keyDir = 0; }, showMenu, prestigeCost, launchSpeed, costOf, UPGRADES, newRun, begin };
 })();
 </script>
