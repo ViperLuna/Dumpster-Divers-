@@ -290,36 +290,35 @@ const synth = {
 const sfx = {};
 for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](); };
 
-/* Rocket fire loop: one sound file (made for the longest, 5 s burn) that starts when a burn starts and is cut with a
-   very short fade the moment the burn ends, however early that is. Drop the file in as  sounds/thrust.mp3 . */
-let thrustA = null, thrustOn = false, thrustFade = null, thrustFocus = null, thrustSerial = -1;
+/* Rocket fire: a seamless loop (sounds/thrust.mp3). It plays for as long as the hobo the camera is on is burning,
+   however short or long the burn is, and fades out when the burn ends. A second rocket refreshing the burn, or the
+   camera moving to another burning hobo, just keeps the loop going. After the main hobo splats it follows the focused clone. */
+const THRUST_VOL = .85, THRUST_FADE_MS = 400;
+let thrustA = null, thrustOn = false, thrustFade = null;
 fetch('sounds/thrust.mp3', { method: 'HEAD' }).then(r => { if (r.ok && !SOUNDS.thrust) SOUNDS.thrust = 'sounds/thrust.mp3'; }).catch(() => {});
-function startThrustSound(offset = 0) {               // offset = seconds already burned, so a late join stays in sync with the burn
+function startThrustSound() {
   const url = SOUNDS.thrust; if (!url || S.muted) return;
-  if (!thrustA || thrustA._url !== url) { thrustA = new Audio(url); thrustA._url = url; }
-  clearInterval(thrustFade); thrustA.volume = .85;
-  try { thrustA.currentTime = Math.max(0, offset); } catch (e) {}
-  thrustA.play().catch(() => {}); thrustOn = true;
+  if (!thrustA || thrustA._url !== url) { thrustA = new Audio(url); thrustA._url = url; thrustA.loop = true; }
+  clearInterval(thrustFade); thrustFade = null;
+  if (thrustA.paused) { try { thrustA.currentTime = 0; } catch (e) {} }     // a fresh start; if it was still fading out, just bring the volume back and carry on
+  thrustA.volume = THRUST_VOL; thrustA.play().catch(() => {}); thrustOn = true;
 }
-/* The fire sound follows whichever hobo the camera is on: the main hobo, or after he splats, the focused clone.
-   It (re)starts on a rocket pickup, joins mid-burn if the camera switches to a clone that is already burning, and stops when that burn ends. */
+function stopThrustSound(fast) {                      // fade out (a quick cut when you mute)
+  if (!thrustOn) return; thrustOn = false;
+  const a = thrustA, ms = fast ? 60 : THRUST_FADE_MS, t0 = performance.now(), v0 = a.volume; clearInterval(thrustFade);
+  thrustFade = setInterval(() => {
+    const k = (performance.now() - t0) / ms;
+    if (k >= 1) { clearInterval(thrustFade); thrustFade = null; a.pause(); a.volume = THRUST_VOL; } else a.volume = v0 * (1 - k);
+  }, 16);
+}
 function updateThrustSound() {
   const focus = !G || menuOpen || paused ? null : (G.air || (G.phase === 'dead' ? G.camClone : null));
-  if (focus && focus.thrust > 0) {
-    if (!thrustOn || thrustFocus !== focus || thrustSerial !== focus.rocketId) {
-      thrustFocus = focus; thrustSerial = focus.rocketId;
-      startThrustSound((focus.thrustMax || 0) - focus.thrust);
-    }
-  } else if (thrustOn) { thrustFocus = null; stopThrustSound(); }
-}
-function stopThrustSound() {
-  if (!thrustOn) return; thrustOn = false;
-  const a = thrustA; let v = a.volume; clearInterval(thrustFade);
-  thrustFade = setInterval(() => { v -= .2; if (v <= 0) { clearInterval(thrustFade); a.pause(); a.volume = .85; } else a.volume = v; }, 16);
+  if (focus && focus.thrust > 0) { if (!thrustOn) startThrustSound(); }
+  else if (thrustOn) stopThrustSound();
 }
 const muteBtn = document.getElementById('mute');
 function paintMute() { muteBtn.textContent = S.muted ? '🔇' : '🔊'; }
-muteBtn.addEventListener('click', e => { e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio(); if (S.muted) stopThrustSound(); });
+muteBtn.addEventListener('click', e => { e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio(); if (S.muted) stopThrustSound(true); });
 paintMute();
 
 /* ============================================================== loot tables */
@@ -602,7 +601,6 @@ function touchObjects(h, isMain) {
       h.thrust = Math.max(h.thrust || 0, ST.burn);
       if (h.vy > -THRUST_V) h.vy = -THRUST_V;
       h.chute = null;
-      h.rocketId = (h.rocketId || 0) + 1; h.thrustMax = h.thrust;   // (the fire sound only plays for the hobo the camera is following)
       burst(o.x, o.y, 14, ['#ff9a4a', '#fff', '#ffe27a'], 240, .5); sfx.boost();
       floatText(o.x, o.y - 14, 'ROCKET!', '#ff9a4a');
       G.objs.splice(i, 1);
