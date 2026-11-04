@@ -112,7 +112,7 @@ const CLONE_PALS = [
 
 /* ============================================================== save data */
 const SAVE_KEY = 'dumpsterDivers.v3';
-let S = { cash: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, prestige: 0, muted: false };
+let S = { cash: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, turbo: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, prestige: 0, muted: false };
 try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) {}
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
 
@@ -127,10 +127,12 @@ const UPGRADES = [
   { id: 'hole',   name: 'Bigger Dumpster', desc: 'A wider dumpster is easier to land in, but edge landings fling wilder', max: 40, base: 30, top: 45000 },
   { id: 'rocket', name: 'Rocket Burn',     desc: 'Rockets burn longer. While one burns you smash anything in your way', max: 45, base: 45, top: 150000 },
   { id: 'net',    name: 'Safety Net',      desc: 'The net under the dumpster lasts longer',                   max: 40,  base: 30, top: 30000 },
+  { id: 'turbo',  name: 'Turbo Time',      desc: 'Turbo Dumpster (instant steering) lasts longer',            max: 40,  base: 35, top: 45000 },
 ];
 const costOf = u => Math.round(u.base * Math.pow(u.top / u.base, Math.pow((S[u.id] || 0) / (u.max - 1), COST_P)));
 const burnOf = lv => .5 + .1 * lv;            // rocket burn seconds: 0.5 s -> 5.0 s over 45 upgrades
 const netOf  = lv => 10 + .5 * lv;            // safety net seconds: 10 s -> 30 s over 40 upgrades
+const turboOf = lv => 10 + .5 * lv;           // turbo dumpster seconds: 10 s -> 30 s over 40 upgrades
 const THRUST_V = 900;                         // rocket climb speed (px/s); if you are already faster you keep your speed
 
 function stats() {
@@ -141,6 +143,7 @@ function stats() {
     hole:   112 + 1.8 * S.hole,        // dumpster width (each flap/hole is half of it)
     burn:   burnOf(S.rocket || 0),
     netTime: netOf(S.net || 0),
+    turboTime: turboOf(S.turbo || 0),
   };
 }
 
@@ -512,7 +515,7 @@ function applyPowerUp(id, h, isMain, ox, oy) {
       G.netT = ST.netTime; break;
     case 'turbo':
       if (G.turboT > 0) dupBonus(ox, oy); else { floatText(ox, oy - 14, 'TURBO DUMPSTER!', '#ffe27a'); sfx.powerup(); }
-      G.turboT = PU_TIME; break;
+      G.turboT = ST.turboTime; break;
     case 'saver':
       if (G.saver) dupBonus(ox, oy); else { G.saver = true; floatText(ox, oy - 14, 'COMBO SAVER!', '#9ad8ff'); sfx.powerup(); }
       break;
@@ -1044,7 +1047,7 @@ function drawHud() {
     ctx.fillStyle = col; ctx.fillRect(40, py + 5, 70 * clamp(frac, 0, 1), 8); py += 24;
   };
   if (G.wideT > 0) bar('↔️', G.wideT / PU_TIME, '#9ad8ff');
-  if (G.turboT > 0) bar('⚡', G.turboT / PU_TIME, '#ffe27a');
+  if (G.turboT > 0) bar('⚡', G.turboT / ST.turboTime, '#ffe27a');
   if (G.netT > 0) bar('🥅', G.netT / ST.netTime, '#9ad8ff');
   if (G.air && G.air.thrust > 0) bar('🚀', G.air.thrust / ST.burn, '#ff9a4a');
   if (G.saver) bar('🛡️', 1, G.saverUsed && Math.floor(G.time * 6) % 2 ? '#ffb347' : '#ffe27a');
@@ -1115,6 +1118,7 @@ function rowNote(u, lv) {
   if (u.id === 'height') return `bounces build up to ~${money(apexOf(launchMax(lv)) / 10)} m`;
   if (u.id === 'rocket') return `rockets burn ${burnOf(lv).toFixed(1)} s`;
   if (u.id === 'net') return `net lasts ${netOf(lv).toFixed(1)} s`;
+  if (u.id === 'turbo') return `turbo lasts ${turboOf(lv).toFixed(1)} s`;
   if (u.id === 'speed') return `now +${(lv * 4.5).toFixed(lv ? 1 : 0)}% acceleration`;
   return `now +${(lv * 1.6).toFixed(lv ? 1 : 0)}% wider`;
 }
@@ -1158,7 +1162,7 @@ card.addEventListener('click', e => {
     }
     return;
   }
-  if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, prestige: 0, muted: S.muted }; save(); showMenu(null); } return; }
+  if (b.id === 'reset') { if (confirm('Wipe your stash and upgrades?')) { S = { cash: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, turbo: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, prestige: 0, muted: S.muted }; save(); showMenu(null); } return; }
   const id = b.dataset.buy; if (!id) return;
   const u = UPGRADES.find(x => x.id === id), cost = costOf(u);
   if (S[id] < u.max && S.cash >= cost) {
