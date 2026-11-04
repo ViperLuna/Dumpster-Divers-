@@ -791,9 +791,10 @@ function update(dt) {
     }
   } else if (G.phase === 'fly' && G.air) updateMain(dt);
   else if (G.phase === 'dead') {
-    // the run ends once the splat has been seen AND every clone is gone (or after a 60 s safety limit)
+    // like pinball extra balls: the run ends once the splat has been seen AND every clone is down.
+    // The 3-minute limit only guards against a clone that somehow never lands (a legit multiball finishes well within it).
     G.overT -= dt; G.deadT = (G.deadT || 0) + dt;
-    if (G.overT <= 0 && (G.clones.length === 0 || G.deadT > 60)) endRun();
+    if (G.overT <= 0 && (G.clones.length === 0 || G.deadT > 180)) endRun();
   }
 }
 
