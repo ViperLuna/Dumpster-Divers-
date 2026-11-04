@@ -734,8 +734,11 @@ function update(dt) {
   G.dw += (targetDw() - G.dw) * Math.min(1, dt * 6);
 
   // camera follows the airborne hobo up and back down
-  const camTarget = G.air ? Math.min(0, G.air.y - 330) : 0;
-  const camK = clamp(9 + (G.air ? Math.abs(G.air.vy) / 150 : 0), 9, 30);   // tighter follow when he is flying fast
+  // the camera follows the main hobo; once he has splatted but clones are still up, it follows the lowest clone instead
+  let follow = G.air;
+  if (!follow && G.phase === 'dead' && G.clones.length) follow = G.clones.reduce((a, c) => (c.y > a.y ? c : a));
+  const camTarget = follow ? Math.min(0, follow.y - 330) : 0;
+  const camK = clamp(9 + (follow ? Math.abs(follow.vy) / 150 : 0), 9, 30);   // tighter follow when he is flying fast
   G.camY += (camTarget - G.camY) * Math.min(1, dt * camK);
 
   // everything in the air flies in from the side and flies out the other
@@ -777,7 +780,9 @@ function update(dt) {
     }
   }
 
-  if (G.phase === 'fly') steer(dt);               // the dumpster holds still for the opening jump so he lands cleanly
+  // the dumpster holds still for the opening jump so he lands cleanly; and it stays live after the main hobo splats,
+  // for as long as clones are still in the air, so you can keep bouncing them
+  if (G.phase === 'fly' || (G.phase === 'dead' && G.clones.length)) steer(dt);
   if (G.phase === 'jump') {
     G.v = 0;
     G.jumpT += dt / .42;
@@ -785,7 +790,11 @@ function update(dt) {
       launch(0); G.inside = G.jumper; swapFlaps(); sfx.slam(); G.shake = .25; G.phase = 'fly';
     }
   } else if (G.phase === 'fly' && G.air) updateMain(dt);
-  else if (G.phase === 'dead') { G.overT -= dt; if (G.overT <= 0) endRun(); }
+  else if (G.phase === 'dead') {
+    // the run ends once the splat has been seen AND every clone is gone (or after a 60 s safety limit)
+    G.overT -= dt; G.deadT = (G.deadT || 0) + dt;
+    if (G.overT <= 0 && (G.clones.length === 0 || G.deadT > 60)) endRun();
+  }
 }
 
 function endRun() {
@@ -970,8 +979,8 @@ function drawWorld() {
   const sorted = G.objs.slice().sort((a, b) => a.tier - b.tier);
   for (const o of sorted) { const sy = o.y - G.camY; if (sy > -70 && sy < H + 70) drawObj(o); }
 
-  // splats
-  for (const s of G.splats) {
+  // splats: defined here but drawn after the dumpster, so "SPLAT!" is never hidden behind it
+  const drawSplats = () => { for (const s of G.splats) {
     const k = Math.min(1, s.t * 6), fade = clamp(1 - (s.t - 2), 0, 1), sc = s.big ? 1 : .6;
     ctx.save(); ctx.globalAlpha = fade; ctx.translate(s.x, GROUND - 3);
     ctx.fillStyle = s.pal.coat; ctx.beginPath(); ctx.ellipse(0, 0, 30 * k * sc, 7 * k * sc, 0, 0, 7); ctx.fill();
@@ -985,7 +994,7 @@ function drawWorld() {
       const ty = -48 - Math.min(s.t, .6) * 30, tx = clamp(s.x, 62, W - 62) - s.x; ctx.strokeText('SPLAT!', tx, ty); ctx.fillText('SPLAT!', tx, ty);
     }
     ctx.restore();
-  }
+  } };
   // safety net: springy ground
   if (G.netT > 0) {
     const p = .55 + Math.sin(G.time * 10) * .25, fade = Math.min(1, G.netT / 1.2);
@@ -1019,6 +1028,7 @@ function drawWorld() {
 
   for (const c of G.clones) drawHoboFlying(c, c.pal, 1.05);
   if (G.air) drawHoboFlying(G.air, HOBOS[G.air.who].pal, 1.3);
+  drawSplats();                                     // on top of the dumpster and the hobos, so a splat is always visible
 
   for (const p of G.parts) { ctx.globalAlpha = clamp(p.life / p.max, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s); }
   ctx.globalAlpha = 1;
@@ -1059,6 +1069,11 @@ function drawHud() {
     const alt = Math.round(Math.max(0, DTOP - (G.air ? G.air.y : DTOP)) / 10);
     if (G.maxAlt > 40) hudText(`${money(G.maxAlt / 10)} m peak`, W / 2 + 14, 54, 14, 'rgba(255,255,255,.8)', 'center');
     if (G.zone > 0) hudText(ZONES[G.zone].name, W / 2 + 14, 96, 12, '#9ad8ff', 'center');
+    if (G.phase === 'dead' && G.clones.length) {          // the run isn't over until the clones are down
+      ctx.globalAlpha = .7 + Math.sin(G.time * 8) * .3;
+      hudText(`${G.clones.length} clone${G.clones.length === 1 ? '' : 's'} still flying!`, W / 2, 130, 20, '#c9a0ff', 'center');
+      ctx.globalAlpha = 1;
+    }
     // launch power: fills as bounces build up toward this level's ceiling
     const pf = launchFrac(G.streak), bx = W / 2 - 31, by = 62;
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(bx, by, 90, 7);
