@@ -83,7 +83,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.8.2', BUILD = '__BUILD__';
+const VERSION = '0.8.3', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -302,7 +302,7 @@ for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](
 /* Rocket fire: a seamless loop (sounds/thrust.mp3). It plays for as long as the hobo the camera is on is burning,
    however short or long the burn is, and fades out when the burn ends. A second rocket refreshing the burn, or the
    camera moving to another burning hobo, just keeps the loop going. After the main hobo splats it follows the focused clone. */
-const THRUST_VOL = .85, THRUST_FADE_MS = 400;
+const THRUST_VOL = .72, THRUST_FADE_MS = 400;       // rocket fire loudness (was .85; lowered 15%)
 let thrustA = null, thrustOn = false, thrustFade = null;
 fetch('sounds/thrust.mp3', { method: 'HEAD' }).then(r => { if (r.ok && !SOUNDS.thrust) SOUNDS.thrust = 'sounds/thrust.mp3'; }).catch(() => {});
 function startThrustSound() {
