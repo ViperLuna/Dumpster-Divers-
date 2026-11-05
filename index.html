@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.10.1', BUILD = '__BUILD__';
+const VERSION = '0.10.2', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -690,13 +690,18 @@ function touchObjects(h, isMain) {
       // eases him: it takes most of the sideways drift and some speed off so he can settle. The count resets with each flight.
       h.hazN = (h.hazN || 0) + 1; const wild = h.hazN % 2 === 1;
       let vx = h.vx, vy = h.vy;
+      // Each bump also varies a little, so no two hits feel the same (the ranges never overlap: wild stays wild, eased stays eased)
       if (wild) {
         const dot = vx * nx + vy * ny;
         if (dot < 0) { vx -= 2 * dot * nx; vy -= 2 * dot * ny; }
-        vx += nx * BUMP_WILD; vy += ny * BUMP_WILD;
-        const sp = Math.hypot(vx, vy); if (sp > BUMP_WILD_CAP) { vx *= BUMP_WILD_CAP / sp; vy *= BUMP_WILD_CAP / sp; }
+        const shove = BUMP_WILD * rand(.75, 1.25);
+        vx += nx * shove; vy += ny * shove;
+        const sp = Math.hypot(vx, vy), cap = BUMP_WILD_CAP * rand(.9, 1.1); if (sp > cap) { vx *= cap / sp; vy *= cap / sp; }
+        const tilt = rand(-.2, .2), cs = Math.cos(tilt), sn = Math.sin(tilt);          // a small random twist in the direction he is thrown (up to about 11 degrees)
+        [vx, vy] = [vx * cs - vy * sn, vx * sn + vy * cs];
       } else {
-        vx = vx * BUMP_EASE_X + nx * 50; vy = vy * BUMP_EASE_Y + ny * 50;
+        const ex = clamp(BUMP_EASE_X * rand(.55, 1.45), .15, .55), ey = clamp(BUMP_EASE_Y * rand(.88, 1.1), .6, .92);
+        vx = vx * ex + nx * 50; vy = vy * ey + ny * 50;
       }
       h.vx = vx; h.vy = vy; o.cd = .45; G.shake = Math.max(G.shake, wild ? .3 : .12);
       if (isMain) h.hazHit = true;                                // (counts toward "Bounce After a Bump" if he lands in the dumpster)
