@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.11.3', BUILD = '__BUILD__';
+const VERSION = '0.11.4', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -532,7 +532,6 @@ const ACH_CATS = [
   numCat('wide',    'Big Dumpster Bounces',   'wide',        ONE_TEN, n => `Bounce while the Big Dumpster power-up is on (${money(n)}x)`),
   numCat('turbo',   'Turbo Bounces',          'turbo',       ONE_TEN, n => `Bounce while the Turbo Dumpster is on (${money(n)}x)`),
   numCat('bolt',    'Lightning Strikes',      'lightning',   ONE_TEN, n => `Catch ${money(n)} lightning capsule${n === 1 ? '' : 's'}`),
-  numCat('items',   'Total Items Collected',  'items',       ROUTINE, n => `Collect ${money(n)} items (hobos, clones or lightning)`),
   numCat('bolthit', 'Lightning Item Hits',    'boltItems',   ROUTINE, n => `Lightning takes ${money(n)} items`),
   numCat('height',  'Height',                 'height',      HEIGHT_MILESTONES, n => `Fly ${fmtHeight(n)} high`, fmtHeight),
   { id: 'special', name: 'Special', items: [
@@ -540,6 +539,8 @@ const ACH_CATS = [
     { id: 'ufo:1', label: 'UFO Contact', short: 'UFO Contact', desc: 'Touch a UFO' },
   ] },
   { id: 'maxups', name: 'Maxed Upgrades', items: UPGRADES.map(u => ({ id: `maxup:${u.id}`, label: `Maxed ${u.name}`, short: u.name, desc: `Take ${u.name} to its max level (${u.max})` })) },
+  // the grand total goes last: every loot item taken by anything (a hobo, a clone, or lightning)
+  numCat('items',   'Total Items Collected',  'items',       ROUTINE, n => `Collect ${money(n)} items (by hobos, clones or lightning)`),
 ];
 const ACH_ALL = ACH_CATS.flatMap(c => c.items);
 const achCount = () => ACH_ALL.filter(it => S.ach[it.id]).length;
