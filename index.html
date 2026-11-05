@@ -83,7 +83,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.8.0', BUILD = '__BUILD__';
+const VERSION = '0.8.1', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -718,7 +718,10 @@ function updateMain(dt) {
         return;
       }
       if (Math.abs(dc) <= f / 2 + 4) {              // landed on the closed flap
-        a.bonked = true; a.vy = -260; a.vx = (dc < 0 ? -1 : 1) * 280; a.chute = null;
+        // a bonk kicks him away from the dumpster, EXCEPT while he is sweeping along on the net: then he keeps his heading
+        // (so he only ever turns around at the walls)
+        a.bonked = true; a.vy = -260; a.chute = null;
+        a.vx = a.netRun ? (Math.sign(a.vx) || 1) * Math.max(Math.abs(a.vx), 140) : (dc < 0 ? -1 : 1) * 280;
         floatText(a.x, DTOP - 40, 'BONK!', '#ff9a7a'); sfx.bonk();
       }
     }
@@ -726,8 +729,13 @@ function updateMain(dt) {
   }
 }
 function groundHit(a) {
-  if (G.netT > 0) {                                 // safety net: bounce in a random direction
-    a.y = GROUND - HR - 1; a.vy = -rand(420, 560); a.vx = (Math.random() < .5 ? -1 : 1) * rand(90, 260);
+  if (G.netT > 0) {                                 // safety net
+    a.y = GROUND - HR - 1; a.vy = -rand(420, 560);
+    // The FIRST net bounce picks a random direction and speed. Every later bounce keeps heading that way, and the side
+    // walls turn him around (physics already flips his sideways speed there), so he sweeps predictably back and forth.
+    if (!a.netSpeed) a.netSpeed = rand(110, 200);
+    const dir = a.netRun ? (Math.sign(a.vx) || 1) : (Math.random() < .5 ? -1 : 1);
+    a.vx = dir * a.netSpeed; a.netRun = true;
     a.bonked = false; a.chute = null;
     if (G.saver) { G.saverUsed = true; floatText(a.x, GROUND - 60, 'COMBO SAVED!', '#9ad8ff'); }   // keeps saving until he is back in the dumpster
     else G.streak = 0;
