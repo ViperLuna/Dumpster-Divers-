@@ -91,8 +91,8 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.10.2', BUILD = '__BUILD__';
-const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
+const VERSION = '0.10.3', BUILD = '__BUILD__';
+const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
 const DTOP = 670;                 // world y of the dumpster rim (the world scrolls UP from here)
@@ -267,10 +267,25 @@ const moonImg = document.createElement('canvas'); moonImg.width = MOON_R * 2; mo
 // file, set e.g.  SOUNDS.splat = 'sounds/splat.mp3'  and that file plays instead.
 const SOUNDS = {};
 const _audioCache = {};
-let ac = null;
+let ac = null, audioReady = false;
 function audio() {
-  if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-  if (ac && ac.state === 'suspended') ac.resume();
+  if (!ac) {
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    if (ac) ac.onstatechange = () => { const v = document.getElementById('ver'); if (v) v.textContent = versionText(); };
+  }
+  if (ac && ac.state !== 'running') { try { ac.resume(); } catch (e) {} }    // iPhones/iPads keep it 'suspended' (or 'interrupted') until a tap
+  if (!audioReady && ac) {                                                    // the very first tap: the iOS unlock tricks
+    audioReady = true;
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}   // iOS 17+: the Ring/Silent switch no longer mutes the game
+    try { const s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, 22050); s.connect(ac.destination); s.start(0); } catch (e) {}   // a silent blip to wake the audio engine
+  }
+  primeThrustAudio();
+}
+function audioStatus() {                                                      // shown next to the version label, so a tester can tell us what their phone says
+  if (!(window.AudioContext || window.webkitAudioContext)) return 'sound unavailable';
+  if (S.muted) return 'sound off';
+  if (!ac) return 'tap for sound';
+  return ac.state === 'running' ? 'sound on' : 'tap to enable sound';
 }
 function tone(f, d, type = 'square', vol = .06, slide = 0, delay = 0) {
   if (!ac || S.muted) return;
@@ -314,11 +329,25 @@ for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](
    however short or long the burn is, and fades out when the burn ends. A second rocket refreshing the burn, or the
    camera moving to another burning hobo, just keeps the loop going. After the main hobo splats it follows the focused clone. */
 const THRUST_VOL = .72, THRUST_FADE_MS = 400;       // rocket fire loudness (was .85; lowered 15%)
-let thrustA = null, thrustOn = false, thrustFade = null;
+let thrustA = null, thrustOn = false, thrustFade = null, thrustPrimed = false, thrustPriming = false;
 fetch('sounds/thrust.mp3', { method: 'HEAD' }).then(r => { if (r.ok && !SOUNDS.thrust) SOUNDS.thrust = 'sounds/thrust.mp3'; }).catch(() => {});
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+/* iPhones only let a page play an audio element later if that same element was started once inside a tap. So on the first
+   tap we "play" a silent clip on the ONE element the rocket sound uses; when a rocket needs it, we just swap in the real file. */
+function primeThrustAudio() {
+  if (thrustPrimed || thrustPriming) return;
+  thrustPriming = true;
+  try {
+    if (!thrustA) thrustA = new Audio();
+    thrustA.src = SILENT_WAV; thrustA._url = SILENT_WAV; thrustA.loop = false;
+    const done = ok => { thrustPriming = false; if (ok) thrustPrimed = true; try { thrustA.pause(); } catch (e) {} };
+    const pr = thrustA.play(); if (pr && pr.then) pr.then(() => done(true)).catch(() => done(false)); else done(true);
+  } catch (e) { thrustPriming = false; }
+}
 function startThrustSound() {
   const url = SOUNDS.thrust; if (!url || S.muted) return;
-  if (!thrustA || thrustA._url !== url) { thrustA = new Audio(url); thrustA._url = url; thrustA.loop = true; }
+  if (!thrustA) thrustA = new Audio();
+  if (thrustA._url !== url) { thrustA.src = url; thrustA._url = url; thrustA.loop = true; }
   clearInterval(thrustFade); thrustFade = null;
   if (thrustA.paused) { try { thrustA.currentTime = 0; } catch (e) {} }     // a fresh start; if it was still fading out, just bring the volume back and carry on
   thrustA.volume = THRUST_VOL; thrustA.play().catch(() => {}); thrustOn = true;
@@ -338,7 +367,11 @@ function updateThrustSound() {
 }
 const muteBtn = document.getElementById('mute');
 function paintMute() { muteBtn.textContent = S.muted ? '🔇' : '🔊'; }
-muteBtn.addEventListener('click', e => { e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio(); if (S.muted) stopThrustSound(true); });
+muteBtn.addEventListener('click', e => {
+  e.stopPropagation(); S.muted = !S.muted; save(); paintMute(); audio();
+  if (S.muted) stopThrustSound(true); else sfx.coin();                       // un-muting plays a beep, so you can hear that sound works
+  const v = document.getElementById('ver'); if (v) v.textContent = versionText();
+});
 paintMute();
 
 /* ============================================================== loot tables */
@@ -1417,6 +1450,10 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// Wake the audio on any kind of tap or key (iPhones only count some of them), and again when the tab comes back to the front
+for (const ev of ['touchend', 'click', 'keydown', 'pointerup'])
+  window.addEventListener(ev, () => { audio(); const v = document.getElementById('ver'); if (v) v.textContent = versionText(); }, { passive: true });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) audio(); });
 // credit what is already earned before this feature existed: height records and maxed upgrades
 if (!S.achBackfill) { statMax('height', S.bestAlt || 0); checkMaxUps(); S.achBackfill = true; save(); }   // one time only, so "reset achievements" sticks
 newRun();
