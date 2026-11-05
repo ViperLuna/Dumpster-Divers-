@@ -54,6 +54,8 @@
   @keyframes pulse { 50% { transform:scale(1.05); } }
   #title .tip { margin-top:1.1em; color:var(--ink); font-size:.9em; text-align:center; line-height:1.5; text-shadow:0 .1em .3em #000;
     background:rgba(5,6,14,.62); padding:.5em .9em; border-radius:.7em; }
+  #title .ver { position:absolute; left:0; right:0; bottom:.7em; text-align:center; font-size:.8em; color:#fff; opacity:.75; text-shadow:0 .1em .3em #000, 0 0 .5em #000; letter-spacing:.03em; }
+  .verline { opacity:.7; font-size:.95em; }
   #mute { position:absolute; right:.6em; top:.6em; z-index:5; padding:.3em .55em; font-size:1.2em; background:rgba(0,0,0,.45);
     color:#fff; box-shadow:none; border-radius:.5em; }
 </style>
@@ -65,6 +67,7 @@
   <div id="overlay" class="hidden"><div class="card" id="card"></div></div>
   <div id="title">
     <div class="art"><img src="assets/title-portrait.jpg" alt="Dumpster Divers: a Viperbot game" draggable="false"></div>
+    <div class="ver" id="ver"></div>
     <div class="cta">
       <button id="start">START</button>
       <div class="tip">Bounce the hobos, grab the junk, don’t hit the pavement.<br>Steer with your mouse, finger, or ← → keys.</div>
@@ -77,6 +80,12 @@
 'use strict';
 
 /* ============================================================== constants */
+/* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
+   Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
+   (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
+const VERSION = '0.8.0', BUILD = '__BUILD__';
+const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
+
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
 const DTOP = 670;                 // world y of the dumpster rim (the world scrolls UP from here)
 const GROUND = 756;
@@ -1163,6 +1172,7 @@ function drawHud() {
 /* ============================================================== menu / shop (DOM) */
 const overlay = document.getElementById('overlay'), card = document.getElementById('card');
 const title = document.getElementById('title');
+document.getElementById('ver').textContent = versionText();
 function titleOpen() { return !title.classList.contains('hidden'); }
 function showTitle() { menuOpen = true; overlay.classList.add('hidden'); title.classList.remove('hidden'); }
 /* START: if you can afford an upgrade you land in the shop first; otherwise you go straight into a run. */
@@ -1202,7 +1212,7 @@ function showMenu(res) {
       Resets upgrades and stash to zero. Records stay.</small></div>
       <button id="prestige" ${S.cash < prestigeCost(S.prestige || 0) ? 'disabled' : ''}>$${money(prestigeCost(S.prestige || 0))}</button></div>
     <button class="go" id="go">${first ? 'DIVE IN' : 'TRY AGAIN'}</button>
-    <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>Land on the LEFT of the hole and the next hobo flies RIGHT.<br>Best haul $${money(S.bestCash)} · highest ${money(S.bestAlt)} m<br>Furthest zone: ${ZONES[S.bestZone || 0].name}${S.ach.leap ? ' · 🏆 One Giant Leap' : ''}</div>
+    <div class="hint">Steer: move your mouse, drag a finger, or use ← → / A D.<br>Land on the LEFT of the hole and the next hobo flies RIGHT.<br>Best haul $${money(S.bestCash)} · highest ${money(S.bestAlt)} m<br>Furthest zone: ${ZONES[S.bestZone || 0].name}${S.ach.leap ? ' · 🏆 One Giant Leap' : ''}<br><span class="verline">${versionText()}</span></div>
     <button class="reset" id="reset">reset progress</button>`;
 }
 card.addEventListener('click', e => {

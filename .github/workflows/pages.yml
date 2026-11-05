@@ -26,6 +26,8 @@ jobs:
         run: |
           mkdir _site
           cp index.html _site/
+          # stamp this deploy with the short commit code so the in-game version label shows exactly which build is live
+          sed -i "s/__BUILD__/${GITHUB_SHA::7}/" _site/index.html
           cp -r assets _site/
           if [ -d sounds ]; then cp -r sounds _site/; fi
       - uses: actions/configure-pages@v5
