@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.10.0', BUILD = '__BUILD__';
+const VERSION = '0.10.1', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -822,7 +822,7 @@ function groundHit(a) {
     const dir = a.netRun ? (Math.sign(a.vx) || 1) : (Math.random() < .5 ? -1 : 1);
     a.vx = dir * a.netSpeed; a.netRun = true;
     a.bonked = false; a.chute = null;
-    statAdd('netBounces');
+    statAdd('netBounces'); a.hazN = 0;                  // every fresh bounce restarts the obstacle-hit count
     if (G.saver) { G.saverUsed = true; floatText(a.x, GROUND - 60, 'COMBO SAVED!', '#9ad8ff'); }   // keeps saving until he is back in the dumpster
     else G.streak = 0;
     burst(a.x, GROUND - 6, 14, ['#9ad8ff', '#fff'], 260, .5); sfx.net(); G.shake = .3;
@@ -842,7 +842,7 @@ function cloneVsDumpster(c, prevBottom) {
   if (!(c.vy > 0 && bottom >= level && prevBottom <= level + 6)) return;
   const dh = wd(c.x, flapCenter(opp(G.closed))), dc = wd(c.x, flapCenter(G.closed));
   if (Math.abs(dh) <= f / 2 + 6 && (c.hops || 0) < CLONE_HOPS) {
-    c.hops = (c.hops || 0) + 1; statAdd('cloneBounces');
+    c.hops = (c.hops || 0) + 1; statAdd('cloneBounces'); c.hazN = 0;
     c.y = level - HR - 1; c.chute = null;
     c.vy = -launchSpeed(G.streak) * rand(.6, .85);
     c.vx = -FLING * dh + rand(-1, 1) * 30;
