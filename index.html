@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.9.3', BUILD = '__BUILD__';
+const VERSION = '0.10.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -105,7 +105,9 @@ const HAZARD_AFTER = 15;          // hazards (the things that bump you around) o
 const CLONE_HOPS = 2;             // times the dumpster's hole can bounce one clone back up
 const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
-const TURBO_KEY_V = 900;          // turbo: arrow-key speed in px/s (about half a second to cross the screen)
+const BUMP_WILD = 320, BUMP_WILD_CAP = 1150;   // odd obstacle hits: the extra shove and the speed limit (was 240 / 950)
+const BUMP_EASE_X = .35, BUMP_EASE_Y = .8;      // even obstacle hits keep this fraction of his sideways / vertical speed
+const TURBO_KEY_V = 900;         // turbo: arrow-key speed in px/s (about half a second to cross the screen)
 const TURBO_SLIDE = 4500;         // turbo: how fast the dumpster slides to the cursor/finger (px/s), i.e. near-instant
 const FLING = 4;                  // launch sideways speed per px landed off-centre
 
@@ -684,15 +686,23 @@ function touchObjects(h, isMain) {
       G.objs.splice(i, 1);
     } else if (o.kind === 'haz') {
       let nx = h.x - o.x, ny = h.y - o.y; const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;
-      let vx = h.vx, vy = h.vy; const dot = vx * nx + vy * ny;
-      if (dot < 0) { vx -= 2 * dot * nx; vy -= 2 * dot * ny; }
-      vx += nx * 240; vy += ny * 240;
-      const sp = Math.hypot(vx, vy); if (sp > 950) { vx *= 950 / sp; vy *= 950 / sp; }
-      h.vx = vx; h.vy = vy; o.cd = .45; G.shake = Math.max(G.shake, .25);
+      // Bumps alternate within one flight: every ODD hit (1st, 3rd...) throws him off wildly, every EVEN hit (2nd, 4th...)
+      // eases him: it takes most of the sideways drift and some speed off so he can settle. The count resets with each flight.
+      h.hazN = (h.hazN || 0) + 1; const wild = h.hazN % 2 === 1;
+      let vx = h.vx, vy = h.vy;
+      if (wild) {
+        const dot = vx * nx + vy * ny;
+        if (dot < 0) { vx -= 2 * dot * nx; vy -= 2 * dot * ny; }
+        vx += nx * BUMP_WILD; vy += ny * BUMP_WILD;
+        const sp = Math.hypot(vx, vy); if (sp > BUMP_WILD_CAP) { vx *= BUMP_WILD_CAP / sp; vy *= BUMP_WILD_CAP / sp; }
+      } else {
+        vx = vx * BUMP_EASE_X + nx * 50; vy = vy * BUMP_EASE_Y + ny * 50;
+      }
+      h.vx = vx; h.vy = vy; o.cd = .45; G.shake = Math.max(G.shake, wild ? .3 : .12);
       if (isMain) h.hazHit = true;                                // (counts toward "Bounce After a Bump" if he lands in the dumpster)
       if (o.e === '🛸') achUnlock('ufo:1', 'UFO Contact');
       burst(h.x, h.y, 10, ['#ff9a7a', '#fff'], 220, .4); sfx.hazard();
-      floatText(h.x, h.y - 22, 'BUMP!', '#ff9a7a');
+      floatText(h.x, h.y - 22, wild ? 'BUMP!' : 'soft bump', wild ? '#ff9a7a' : '#9ad8ff');
     }
   }
 }
