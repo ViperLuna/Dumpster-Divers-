@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.9.1', BUILD = '__BUILD__';
+const VERSION = '0.9.2', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -459,6 +459,7 @@ function numCat(id, name, counter, tiers, desc, short = n => money(n)) {
 const ACH_CATS = [
   numCat('streak',  'Consecutive Bounces',    'streak',      [10, 25, 50, 100, 1000], n => `${money(n)} bounces in a row (your combo)`),
   numCat('bounces', 'Total Bounces',          'bounces',     ROUTINE, n => `${money(n)} bounces in total`),
+  numCat('splats',  'Total Splats',           'splats',      ROUTINE, n => `${money(n)} hobos flattened on the pavement`),
   numCat('clones',  'Total Clone Bounces',    'cloneBounces', ROUTINE, n => `Clones bounced off the dumpster ${money(n)} times`),
   numCat('nets',    'Total Net Bounces',      'netBounces',  ROUTINE, n => `${money(n)} bounces off the safety net`),
   numCat('netsave', 'Net Bounce Saves',       'netSaves',    ONE_TEN, n => `Bounce off the net, then land in the dumpster (${money(n)}x)`),
@@ -816,6 +817,7 @@ function groundHit(a) {
     burst(a.x, GROUND - 6, 14, ['#9ad8ff', '#fff'], 260, .5); sfx.net(); G.shake = .3;
     return;
   }
+  statAdd('splats');
   G.splats.push({ x: a.x, t: 0, pal: HOBOS[a.who].pal, big: true });
   burst(a.x, GROUND - 6, 22, ['#ffe27a', '#fff', '#ff9a7a', '#8fd0ff'], 320, .8);
   G.shake = 1; sfx.splat();
@@ -911,6 +913,7 @@ function update(dt) {
       physics(c, h); touchObjects(c, false);
       cloneVsDumpster(c, prevBottom);
       if (c.y + HR >= GROUND) {
+        statAdd('splats');
         G.splats.push({ x: c.x, t: 0, pal: c.pal, big: false });
         burst(c.x, GROUND - 6, 10, ['#fff', '#ffe27a'], 200, .5); sfx.cloneSplat();
         G.clones.splice(i, 1);
