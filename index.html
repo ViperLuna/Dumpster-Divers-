@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.10.3', BUILD = '__BUILD__';
+const VERSION = '0.11.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -320,6 +320,7 @@ const synth = {
   chute()      { tone(500, .3, 'sine', .07, -250); },
   zone()       { tone(440, .12, 'triangle', .08); tone(660, .12, 'triangle', .08, 0, .1); tone(880, .3, 'triangle', .08, 0, .2); },
   achieve()    { tone(784, .1, 'triangle', .07); tone(988, .1, 'triangle', .07, 0, .09); tone(1318, .24, 'triangle', .07, 0, .18); },
+  bolt()       { tone(2400, .07, 'sawtooth', .09, -2100); tone(1400, .1, 'square', .06, -1100, .03); tone(95, .35, 'sawtooth', .12, -50, .04); },
   leap()       { for (let i = 0; i < 6; i++) tone(330 * Math.pow(1.26, i), .22, 'triangle', .09, 0, i * .11); tone(1320, .6, 'sine', .08, 0, .75); },
 };
 const sfx = {};
@@ -402,6 +403,7 @@ const PUS = [
   { id: 'multi',  e: '👥', w: 8 },
   { id: 'chute',  e: '🪂', w: 20 },
   { id: 'turbo',  e: '⚡', w: 9 },
+  { id: 'bolt',   e: '🌩️', w: 6 },                  // lightning: rare
 ];
 // Zone flavour: extra loot mixed into each tier (zone -> tier -> items)
 const ZONE_ITEMS = [
@@ -454,7 +456,7 @@ function newRun() {
     jumper, inside: 1 - jumper, jumpT: 0,
     air: null, clones: [], cloneIdx: 0,
     objs: [], parts: [], floats: [], hudFloats: [], splats: [],
-    cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0, zone: 0, banner: null, newAch: [], toasts: [], toastT: 0,
+    cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0, zone: 0, banner: null, newAch: [], toasts: [], toastT: 0, bolts: [],
     wideT: 0, netT: 0, turboT: 0, saver: false, saverUsed: false,
     spawnT: 0, shake: 0, time: 0, overT: 0, slam: 0, deadWho: 0, camY: 0,
   };
@@ -505,6 +507,7 @@ const ACH_CATS = [
   numCat('chute',   'Parachute Bounces',      'chute',       ONE_TEN, n => `Land in the dumpster under a parachute (${money(n)}x)`),
   numCat('wide',    'Big Dumpster Bounces',   'wide',        ONE_TEN, n => `Bounce while the Big Dumpster power-up is on (${money(n)}x)`),
   numCat('turbo',   'Turbo Bounces',          'turbo',       ONE_TEN, n => `Bounce while the Turbo Dumpster is on (${money(n)}x)`),
+  numCat('bolt',    'Lightning Strikes',      'lightning',   ONE_TEN, n => `Catch ${money(n)} lightning capsule${n === 1 ? '' : 's'}`),
   numCat('height',  'Height',                 'height',      HEIGHT_MILESTONES, n => `Fly ${fmtHeight(n)} high`, fmtHeight),
   { id: 'special', name: 'Special', items: [
     { id: 'leap', label: 'One Giant Leap', short: 'One Giant Leap', desc: 'Reach the moon' },
@@ -648,6 +651,9 @@ function applyPowerUp(id, h, isMain, ox, oy) {
     case 'net':
       if (G.netT > 0) dupBonus(ox, oy); else { floatText(ox, oy - 14, 'SAFETY NET!', '#9ad8ff'); sfx.powerup(); }
       G.netT = ST.netTime; break;
+    case 'bolt':                                    // instant: a lightning strike down a random column of the screen
+      statAdd('lightning'); strikeLightning(h, isMain, ox, oy);
+      break;
     case 'turbo':
       if (G.turboT > 0) dupBonus(ox, oy); else { floatText(ox, oy - 14, 'TURBO DUMPSTER!', '#ffe27a'); sfx.powerup(); }
       G.turboT = ST.turboTime; break;
@@ -664,6 +670,74 @@ function applyPowerUp(id, h, isMain, ox, oy) {
         if (!isMain && G.phase === 'dead') G.camClone = G.lastSpawned[G.lastSpawned.length - 1];   // a clone caught a capsule: the camera jumps to one of its new clones
       }
       break;
+  }
+}
+
+/* ============================================================== lightning
+   A bolt cracks down a random column of what is currently on screen, with zigzags and one or two branches.
+   Everything visible that it touches is taken: loot is collected, other power-up capsules are applied, hazards are destroyed. */
+const BOLT_R = 34;                                  // how close (px) an object must be to the bolt to be hit
+function boltPath(xc) {                             // screen coordinates: y runs 0..H
+  const pts = [], n = 8; let x = xc;
+  for (let i = 0; i <= n; i++) { pts.push({ x, y: -10 + (H + 20) * i / n }); x = clamp(x + rand(-26, 26), xc - 36, xc + 36); x = clamp(x, 12, W - 12); }
+  const branches = [], nb = Math.random() < .5 ? 1 : 2;
+  for (let b = 0; b < nb; b++) {
+    const s = pts[2 + ((Math.random() * 4) | 0)], dir = Math.random() < .5 ? -1 : 1; let bx = s.x, by = s.y; const br = [{ x: bx, y: by }];
+    for (let k = 0; k < 3; k++) { bx = clamp(bx + dir * rand(24, 46), 8, W - 8); by += rand(55, 85); br.push({ x: bx, y: by }); }
+    branches.push(br);
+  }
+  return { pts, branches };
+}
+function segDist(px, py, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1, t = clamp(((px - a.x) * dx + (py - a.y) * dy) / L, 0, 1);
+  return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+}
+function boltDist(bolt, px, py) {
+  let d = 1e9;
+  for (const poly of [bolt.pts, ...bolt.branches]) for (let i = 0; i < poly.length - 1; i++) d = Math.min(d, segDist(px, py, poly[i], poly[i + 1]));
+  return d;
+}
+function strikeLightning(h, isMain, ox, oy) {
+  const camY = G.camY;
+  const visible = G.objs.filter(o => !o.dead && o.y - camY > -24 && o.y - camY < H + 24 && o.x > -10 && o.x < W + 10);
+  const touches = (bolt, o) => boltDist(bolt, o.x, o.y - camY) <= BOLT_R + o.r * .4;
+  let best = null, bestN = -1;                      // "random", but the best of three tries, so a rare capsule is rarely wasted
+  for (let k = 0; k < 3; k++) { const b = boltPath(rand(40, W - 40)), n = visible.filter(o => touches(b, o)).length; if (n > bestN) { best = b; bestN = n; } }
+  let hits = 0;
+  for (const o of visible) {
+    if (!touches(best, o)) continue;
+    if (o.kind === 'item') {
+      const gain = Math.round(earn(o.v * multiplier())); floatText(o.x, o.y - 10, `+$${gain}`, '#cfc6ff');
+      if (!isMain) hudFloat(`+$${gain}`, '#cfc6ff');
+    } else if (o.kind === 'pu' && o.id !== 'bolt') {   // (a bolt capsule is never chained)
+      applyPowerUp(o.id, h, isMain, o.x, o.y);
+    } else if (o.kind === 'haz') {                      // destroyed, like a rocket smash
+      const gain = Math.round(earn(10 * (1 + zoneAt(DTOP - o.y)))); floatText(o.x, o.y - 18, `ZAP! +$${gain}`, '#cfc6ff');
+    } else continue;
+    burst(o.x, o.y, 14, ['#cfc6ff', '#fff', '#8fa8ff'], 240, .5); o.dead = true; hits++;
+  }
+  if (!hits) { const g = Math.round(earn(5)); floatText(ox, oy - 20, `ZAP! nothing in the way  +$${g}`, '#cfc6ff'); hudFloat(`+$${g} bonus`, '#cfc6ff'); }
+  else floatText(ox, oy - 20, `LIGHTNING! ${hits} hit${hits === 1 ? '' : 's'}`, '#cfc6ff');
+  G.bolts.push({ bolt: best, t: 0 });
+  G.shake = Math.max(G.shake, .45); sfx.bolt();
+}
+function drawBolts() {                              // drawn on the screen (not the world): flicker, then a fading halo
+  for (const B of G.bolts) {
+    const t = B.t, flash = t < .22, polys = [B.bolt.pts, ...B.bolt.branches];
+    if (t < .12) { ctx.fillStyle = `rgba(215,205,255,${.32 * (1 - t / .12)})`; ctx.fillRect(0, 0, W, H); }          // a quick whiteout
+    ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    const halo = flash ? 1 : clamp(1 - (t - .22) / .6, 0, 1);
+    ctx.shadowColor = 'rgba(150,135,255,.95)'; ctx.shadowBlur = 24;
+    for (const poly of polys) {
+      ctx.beginPath(); poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.strokeStyle = `rgba(150,135,255,${.5 * halo})`; ctx.lineWidth = 22 * (flash ? 1 : .6 + .4 * halo); ctx.stroke();       // the halo
+      if (flash) {
+        const on = Math.floor(t * 45) % 2 === 0 || t < .07;                                                                       // flickers
+        ctx.strokeStyle = `rgba(190,180,255,${on ? .8 : .45})`; ctx.lineWidth = 9; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.strokeStyle = on ? '#fff' : 'rgba(255,255,255,.7)'; ctx.lineWidth = poly === B.bolt.pts ? 4 : 2.5; ctx.stroke(); ctx.shadowBlur = 24;   // the white core
+      }
+    }
+    ctx.restore();
   }
 }
 
@@ -689,6 +763,7 @@ function physics(h, dt) {
 function touchObjects(h, isMain) {
   for (let i = G.objs.length - 1; i >= 0; i--) {
     const o = G.objs[i];
+    if (!o || o.dead) continue;                       // (a lightning strike can remove several objects at once)
     if (o.kind === 'haz' && o.cd > 0) continue;
     const dx = o.x - h.x, dy = o.y - h.y, rr = HR + o.r - 4;
     if (dx * dx + dy * dy > rr * rr) continue;
@@ -931,6 +1006,9 @@ function update(dt) {
   const camK = clamp(9 + (follow ? Math.abs(follow.vy) / 150 : 0), 9, 30);   // tighter follow when he is flying fast
   G.camY += (camTarget - G.camY) * Math.min(1, dt * camK);
 
+  if (G.objs.some(o => o.dead)) G.objs = G.objs.filter(o => !o.dead);          // things a lightning bolt took
+  for (const B of G.bolts) B.t += dt;
+  if (G.bolts.length && G.bolts[0].t > .9) G.bolts.shift();
   // everything in the air flies in from the side and flies out the other
   for (let i = G.objs.length - 1; i >= 0; i--) {
     const o = G.objs[i]; o.age += dt; o.cd = Math.max(0, o.cd - dt); o.x += o.vx * dt;
@@ -1091,10 +1169,12 @@ function drawObj(o) {
   const t = G.time;
   ctx.save(); ctx.translate(o.x, o.y);
   if (o.kind === 'pu') {
-    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, o.r + 10 + Math.sin(t * 6) * 2);
-    g.addColorStop(0, 'rgba(255,240,150,.95)'); g.addColorStop(.6, 'rgba(255,207,74,.55)'); g.addColorStop(1, 'rgba(255,207,74,0)');
+    const bolt = o.id === 'bolt';                    // the lightning capsule glows violet instead of gold
+    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, o.r + 10 + Math.sin(t * (bolt ? 14 : 6)) * 2);
+    if (bolt) { g.addColorStop(0, 'rgba(225,215,255,.95)'); g.addColorStop(.6, 'rgba(150,130,255,.6)'); g.addColorStop(1, 'rgba(150,130,255,0)'); }
+    else { g.addColorStop(0, 'rgba(255,240,150,.95)'); g.addColorStop(.6, 'rgba(255,207,74,.55)'); g.addColorStop(1, 'rgba(255,207,74,0)'); }
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, o.r + 12, 0, 7); ctx.fill();
-    ctx.fillStyle = 'rgba(20,24,50,.88)'; ctx.strokeStyle = '#ffe27a'; ctx.lineWidth = 2.5;
+    ctx.fillStyle = 'rgba(20,24,50,.88)'; ctx.strokeStyle = bolt ? '#b8a6ff' : '#ffe27a'; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.arc(0, 0, o.r, 0, 7); ctx.fill(); ctx.stroke();
   } else if (o.kind === 'haz') {
     const p = .5 + Math.sin(t * 9) * .5;
@@ -1168,7 +1248,7 @@ function drawWorld() {
   ctx.drawImage(bg, 0, 0, W, H);
 
   // pooled objects: junk by rarity (rarer on top), then power-ups, then bumpers
-  const sorted = G.objs.slice().sort((a, b) => a.tier - b.tier);
+  const sorted = G.objs.filter(o => !o.dead).sort((a, b) => a.tier - b.tier);
   for (const o of sorted) { const sy = o.y - G.camY; if (sy > -70 && sy < H + 70) drawObj(o); }
 
   // splats: defined here but drawn after the dumpster, so "SPLAT!" is never hidden behind it
@@ -1284,6 +1364,7 @@ function drawHud() {
     ctx.beginPath(); ctx.moveTo(hc - f / 2 + 4, y); ctx.lineTo(hc + f / 2 - 4, y); ctx.stroke();
     ctx.restore();
   }
+  drawBolts();
   if (G.toasts.length && !menuOpen) {               // achievement toast: slides in, holds, fades out
     const a = clamp(Math.min(G.toastT / .25, (2.8 - G.toastT) / .5), 0, 1), txt = '🏆 ' + G.toasts[0];
     ctx.save(); ctx.globalAlpha = a; ctx.translate(W / 2, 160 - (1 - a) * 14);
@@ -1461,7 +1542,7 @@ showTitle();
 requestAnimationFrame(frame);
 
 // small hook so the game can be driven by automated tests
-window.__dd = { get G() { return G; }, get st() { return ST; }, get S() { return S; }, ACH_CATS, ACH_ALL, statAdd, statMax, SOUNDS, get thrustAudio() { return thrustA; }, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp,
+window.__dd = { get G() { return G; }, get st() { return ST; }, get S() { return S; }, ACH_CATS, ACH_ALL, statAdd, statMax, strikeLightning, boltDist, SOUNDS, get thrustAudio() { return thrustA; }, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp,
   setTarget: x => { target = x; keyDir = 0; }, showMenu, prestigeCost, launchSpeed, costOf, UPGRADES, newRun, begin };
 })();
 </script>
