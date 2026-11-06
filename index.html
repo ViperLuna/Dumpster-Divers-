@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.12.1', BUILD = '__BUILD__';
+const VERSION = '0.12.2', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -334,6 +334,7 @@ for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](
 const BANKS = {
   bolt:  { files: [1, 2, 3, 4].map(n => `sounds/bolt${n}.mp3`),  vol: .8, buffers: [], last: -1 },     // lightning strike
   splat: { files: [1, 2, 3, 4].map(n => `sounds/splat${n}.mp3`), vol: .8, buffers: [], last: -1 },     // your hobo hits the pavement (about 5 dB quieter than lightning)
+  csplat: { files: [1, 2, 3, 4].map(n => `sounds/csplat${n}.mp3`), vol: .8, buffers: [], last: -1 },   // a CLONE's splat: the same four, pitched up a fifth (chipmunk), same length and same loudness
 };
 let banksLoadStarted = false;
 function loadBanks() {
@@ -355,9 +356,8 @@ function playBank(name, volMul = 1) {                        // volMul: play thi
 }
 const boltBuffers = BANKS.bolt.buffers, playBolt = () => playBank('bolt');
 sfx.bolt = () => { if (!playBank('bolt')) synth.bolt(); };
-const CLONE_SPLAT_VOL = .6;                                              // clones use the same four splats, at 60% so a pile of them never drowns out yours
 sfx.splat = () => { if (!playBank('splat')) synth.splat(); };
-sfx.cloneSplat = () => { if (!playBank('splat', CLONE_SPLAT_VOL)) synth.cloneSplat(); };
+sfx.cloneSplat = () => { if (!playBank('csplat')) synth.cloneSplat(); };      // same volume as yours, but a higher "chipmunk" pitch so you can tell them apart
 
 /* Rocket fire: a seamless loop (sounds/thrust.mp3). It plays for as long as the hobo the camera is on is burning,
    however short or long the burn is, and fades out when the burn ends. A second rocket refreshing the burn, or the
