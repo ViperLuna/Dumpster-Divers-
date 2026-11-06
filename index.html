@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.12.2', BUILD = '__BUILD__';
+const VERSION = '0.12.3', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -102,7 +102,7 @@ const HR = 15;                    // hobo collision radius
 const MAX_LV = 25;
 const CLONE_CAP = 6;
 const HAZARD_AFTER = 15;          // hazards (the things that bump you around) only appear after this many bounces
-const CLONE_HOPS = 2;             // times the dumpster's hole can bounce one clone back up
+const CLONE_HOPS = Infinity;       // no cap: the hole keeps bouncing a clone back up until it misses and splats
 const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
 const BUMP_WILD = 320, BUMP_WILD_CAP = 1150;   // odd obstacle hits: the extra shove and the speed limit (was 240 / 950)
@@ -986,7 +986,7 @@ function groundHit(a) {
 }
 
 /* Clones can use the dumpster too: the closed flap bounces them off, and the open hole throws them back up
-   (same "land left, fly right" rule). The dumpster only saves each clone a couple of times. */
+   (same "land left, fly right" rule). A clone keeps bouncing until it misses the hole and splats. */
 function cloneVsDumpster(c, prevBottom) {
   const f = flap(), bottom = c.y + HR, level = DTOP - 6;
   if (!(c.vy > 0 && bottom >= level && prevBottom <= level + 6)) return;
