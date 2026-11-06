@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.12.3', BUILD = '__BUILD__';
+const VERSION = '0.12.4', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -1138,13 +1138,14 @@ function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3, chute = null) {
   }
   c.rotate(rot); c.scale(sc, sc);
   c.lineCap = 'round'; c.lineJoin = 'round';
-  const s1 = fly ? Math.sin(tt * 17) : Math.sin(tt * 3) * .12;
-  const s2 = fly ? Math.sin(tt * 17 + 1.9) : Math.sin(tt * 3 + 1.2) * .12;
-  limb(c, -4, 8, (fly ? .45 : .1) + s1 * .75, 13, pal.pants, 5.5, pal.shoe);
-  limb(c,  4, 8, -(fly ? .45 : .1) + s2 * .75, 13, pal.pants, 5.5, pal.shoe);
-  const armBase = fly ? Math.PI : 0;
-  limb(c, -8, -4, armBase + (fly ? -.5 : .22) + s2 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
-  limb(c,  8, -4, armBase + (fly ? .5 : -.22) + s1 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
+  const hang = chute === 'open';                    // under a canopy the limbs dangle and only sway a little
+  const s1 = hang ? Math.sin(tt * 2.6) * .09 : fly ? Math.sin(tt * 17) : Math.sin(tt * 3) * .12;
+  const s2 = hang ? Math.sin(tt * 2.6 + 1.9) * .09 : fly ? Math.sin(tt * 17 + 1.9) : Math.sin(tt * 3 + 1.2) * .12;
+  limb(c, -4, 8, hang ? -.1 + s1 : (fly ? .45 : .1) + s1 * .75, 13, pal.pants, 5.5, pal.shoe);
+  limb(c,  4, 8, hang ? .1 - s2 : -(fly ? .45 : .1) + s2 * .75, 13, pal.pants, 5.5, pal.shoe);
+  const armBase = fly && !hang ? Math.PI : 0;
+  limb(c, -8, -4, hang ? -.16 + s2 : armBase + (fly ? -.5 : .22) + s2 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
+  limb(c,  8, -4, hang ? .16 - s1 : armBase + (fly ? .5 : -.22) + s1 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
   c.fillStyle = pal.coat; rr(c, -9.5, -8, 19, 18, 5); c.fill();
   c.fillStyle = pal.coat2; c.fillRect(-1, -8, 2, 18);
   c.fillStyle = pal.patch; rr(c, 2.5, 1, 5.5, 5.5, 1.2); c.fill();
