@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.11.4', BUILD = '__BUILD__';
+const VERSION = '0.12.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -274,7 +274,7 @@ function audio() {
     if (ac) ac.onstatechange = () => { const v = document.getElementById('ver'); if (v) v.textContent = versionText(); };
   }
   if (ac && ac.state !== 'running') { try { ac.resume(); } catch (e) {} }    // iPhones/iPads keep it 'suspended' (or 'interrupted') until a tap
-  if (ac && !boltLoadStarted) loadBoltSounds();                                // (loads the lightning sounds, if the files exist)
+  if (ac && !banksLoadStarted) loadBanks();                                    // (loads the recorded sound banks, if the files exist)
   if (!audioReady && ac) {                                                    // the very first tap: the iOS unlock tricks
     audioReady = true;
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}   // iOS 17+: the Ring/Silent switch no longer mutes the game
@@ -327,28 +327,35 @@ const synth = {
 const sfx = {};
 for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](); };
 
-/* Lightning sounds: up to four files (sounds/bolt1.mp3 .. bolt4.mp3). Each strike plays one at random (never the same twice in a row),
-   all the way through, and strikes that land close together simply layer. They are decoded into the audio engine so a fresh copy can start
-   any time (works the same on iPhones). Until the files exist, the placeholder zap plays instead. */
-const BOLT_FILES = ['sounds/bolt1.mp3', 'sounds/bolt2.mp3', 'sounds/bolt3.mp3', 'sounds/bolt4.mp3'], BOLT_VOL = .8;
-const boltBuffers = []; let boltLoadStarted = false, boltLast = -1;
-function loadBoltSounds() {
-  if (boltLoadStarted || !ac) return; boltLoadStarted = true;
-  for (const url of BOLT_FILES) {
+/* Sound banks: an effect with several recorded variations (sounds/<name>1.mp3 .. <name>4.mp3). Each time it fires, one is picked at random
+   (never the same twice in a row), plays all the way through, and ones that land close together simply layer. They are decoded into the audio
+   engine so a fresh copy can start at any moment (this also works on iPhones). Until a bank's files exist, the placeholder beep plays instead.
+   `vol` is each bank's loudness; the files themselves were levelled so each bank's variations match. */
+const BANKS = {
+  bolt:  { files: [1, 2, 3, 4].map(n => `sounds/bolt${n}.mp3`),  vol: .8, buffers: [], last: -1 },     // lightning strike
+  splat: { files: [1, 2, 3, 4].map(n => `sounds/splat${n}.mp3`), vol: .8, buffers: [], last: -1 },     // your hobo hits the pavement (about 5 dB quieter than lightning)
+};
+let banksLoadStarted = false;
+function loadBanks() {
+  if (banksLoadStarted || !ac) return; banksLoadStarted = true;
+  for (const bank of Object.values(BANKS)) for (const url of bank.files) {
     fetch(url).then(r => (r.ok ? r.arrayBuffer() : Promise.reject()))
       .then(buf => new Promise((res, rej) => ac.decodeAudioData(buf, res, rej)))          // (the callback form also works on older Safari)
-      .then(b => boltBuffers.push(b)).catch(() => {});                                       // a missing file is simply skipped
+      .then(b => bank.buffers.push(b)).catch(() => {});                                       // a missing file is simply skipped
   }
 }
-function playBolt() {
-  if (S.muted || !ac || !boltBuffers.length) return false;
-  let i; do { i = (Math.random() * boltBuffers.length) | 0; } while (boltBuffers.length > 1 && i === boltLast);
-  boltLast = i;
-  const src = ac.createBufferSource(), g = ac.createGain(); src.buffer = boltBuffers[i]; g.gain.value = BOLT_VOL;
+function playBank(name) {
+  const bank = BANKS[name], bufs = bank.buffers;
+  if (S.muted || !ac || !bufs.length) return false;
+  let i; do { i = (Math.random() * bufs.length) | 0; } while (bufs.length > 1 && i === bank.last);
+  bank.last = i;
+  const src = ac.createBufferSource(), g = ac.createGain(); src.buffer = bufs[i]; g.gain.value = bank.vol;
   src.connect(g); g.connect(ac.destination); src.start(0);
   return true;
 }
-sfx.bolt = () => { if (!playBolt()) synth.bolt(); };
+const boltBuffers = BANKS.bolt.buffers, playBolt = () => playBank('bolt');
+sfx.bolt = () => { if (!playBank('bolt')) synth.bolt(); };
+sfx.splat = () => { if (!playBank('splat')) synth.splat(); };         // (a clone's splat keeps its own placeholder sound, so yours is always recognizable)
 
 /* Rocket fire: a seamless loop (sounds/thrust.mp3). It plays for as long as the hobo the camera is on is burning,
    however short or long the burn is, and fades out when the burn ends. A second rocket refreshing the burn, or the
@@ -1570,7 +1577,7 @@ showTitle();
 requestAnimationFrame(frame);
 
 // small hook so the game can be driven by automated tests
-window.__dd = { get G() { return G; }, get st() { return ST; }, get S() { return S; }, ACH_CATS, ACH_ALL, statAdd, statMax, strikeLightning, boltDist, boltBuffers, playBolt, get ac() { return ac; }, SOUNDS, get thrustAudio() { return thrustA; }, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp,
+window.__dd = { get G() { return G; }, get st() { return ST; }, get S() { return S; }, ACH_CATS, ACH_ALL, statAdd, statMax, strikeLightning, boltDist, boltBuffers, playBolt, BANKS, playBank, get ac() { return ac; }, SOUNDS, get thrustAudio() { return thrustA; }, startRun, W, H, DTOP, update: dt => update(dt), spawnObject, applyPowerUp,
   setTarget: x => { target = x; keyDir = 0; }, showMenu, prestigeCost, launchSpeed, costOf, UPGRADES, newRun, begin };
 })();
 </script>
