@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.12.4', BUILD = '__BUILD__';
+const VERSION = '0.12.5', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -782,6 +782,10 @@ function drawBolts() {                              // drawn on the screen (not 
 function physics(h, dt) {
   h.t += dt; h.cd = Math.max(0, h.cd - dt);
   if (h.chute === 'armed' && h.vy > 0) h.chute = 'open';
+  if (h.chute === 'open') {                         // cT = seconds since the canopy popped open (drives the deploy animation)
+    if (h.cT == null) { h.cT = 0; burst(h.x, h.y - 34, 10, ['#fff', '#e8503a', '#ffe9e0'], 170, .45); }
+    else h.cT += dt;
+  } else h.cT = null;
   if (h.thrust > 0) {                               // ROCKET BURN: gravity is off and he climbs at least THRUST_V; faster launches keep their speed
     h.thrust -= dt;
     if (h.vy > -THRUST_V) h.vy = -THRUST_V;
@@ -1124,28 +1128,31 @@ function limb(c, x0, y0, ang, len, col, wid, endCol) {
   c.fillStyle = endCol; c.beginPath(); c.arc(x1, y1, wid * .62, 0, 7); c.fill();
 }
 /* mode 'fly' = flailing arms and legs, 'stand' = idle. Same animation for every hobo; only the palette changes. */
-function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3, chute = null) {
+function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3, chute = null, cT = null) {
   const c = ctx, fly = mode === 'fly';
   c.save(); c.translate(x, y);
-  if (chute === 'open') {                           // parachute canopy
-    c.save(); const cr = 30 * sc / 1.3;
+  const u = chute === 'open' ? (cT == null ? 9 : cT) : 0;            // seconds since the canopy opened
+  if (chute === 'open') {                           // parachute canopy: pops open from a small bundle, overshoots, then settles
+    const e = u > 1 ? 1 : 1 - Math.exp(-7 * u) * Math.cos(16 * u), k = sc / 1.3;
+    c.save(); c.translate(0, -12 * k); c.scale(.2 + .8 * e, .3 + .7 * e + (u < 1 ? Math.sin(u * 9) * .05 * (1 - u) : 0)); c.translate(0, 12 * k);
+    const cr = 30 * k;
     c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1;
-    c.beginPath(); for (const k of [-1, -.35, .35, 1]) { c.moveTo(k * cr, -48 * sc / 1.3); c.lineTo(0, -12 * sc / 1.3); } c.stroke();
-    for (let i = 0; i < 4; i++) { c.fillStyle = i % 2 ? '#fff' : '#e8503a'; c.beginPath(); c.moveTo(-cr + i * cr / 2, -48 * sc / 1.3); c.arc(0, -48 * sc / 1.3, cr, Math.PI + i * Math.PI / 4, Math.PI + (i + 1) * Math.PI / 4); c.closePath(); c.fill(); }
+    c.beginPath(); for (const q of [-1, -.35, .35, 1]) { c.moveTo(q * cr, -48 * k); c.lineTo(0, -12 * k); } c.stroke();
+    for (let i = 0; i < 4; i++) { c.fillStyle = i % 2 ? '#fff' : '#e8503a'; c.beginPath(); c.moveTo(-cr + i * cr / 2, -48 * k); c.arc(0, -48 * k, cr, Math.PI + i * Math.PI / 4, Math.PI + (i + 1) * Math.PI / 4); c.closePath(); c.fill(); }
     c.restore();
   } else if (chute === 'armed') {
     c.fillStyle = '#e8503a'; rr(c, -5, -10 * sc / 1.3, 10, 12, 3); c.fill();
   }
   c.rotate(rot); c.scale(sc, sc);
   c.lineCap = 'round'; c.lineJoin = 'round';
-  const hang = chute === 'open';                    // under a canopy the limbs dangle and only sway a little
-  const s1 = hang ? Math.sin(tt * 2.6) * .09 : fly ? Math.sin(tt * 17) : Math.sin(tt * 3) * .12;
-  const s2 = hang ? Math.sin(tt * 2.6 + 1.9) * .09 : fly ? Math.sin(tt * 17 + 1.9) : Math.sin(tt * 3 + 1.2) * .12;
-  limb(c, -4, 8, hang ? -.1 + s1 : (fly ? .45 : .1) + s1 * .75, 13, pal.pants, 5.5, pal.shoe);
-  limb(c,  4, 8, hang ? .1 - s2 : -(fly ? .45 : .1) + s2 * .75, 13, pal.pants, 5.5, pal.shoe);
-  const armBase = fly && !hang ? Math.PI : 0;
-  limb(c, -8, -4, hang ? -.16 + s2 : armBase + (fly ? -.5 : .22) + s2 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
-  limb(c,  8, -4, hang ? .16 - s1 : armBase + (fly ? .5 : -.22) + s1 * (fly ? .95 : 1), 13, pal.coat2, 4.8, pal.skin);
+  const hk = chute === 'open' ? clamp(u / .5, 0, 1) : 0, L = (x, y) => x + (y - x) * hk;   // 0 = still flailing, 1 = hanging limp
+  const f1 = fly ? Math.sin(tt * 17) : Math.sin(tt * 3) * .12, f2 = fly ? Math.sin(tt * 17 + 1.9) : Math.sin(tt * 3 + 1.2) * .12;
+  const h1 = Math.sin(tt * 2.6) * .09, h2 = Math.sin(tt * 2.6 + 1.9) * .09;
+  limb(c, -4, 8, L((fly ? .45 : .1) + f1 * .75, -.1 + h1), 13, pal.pants, 5.5, pal.shoe);
+  limb(c,  4, 8, L(-(fly ? .45 : .1) + f2 * .75, .1 - h2), 13, pal.pants, 5.5, pal.shoe);
+  const armBase = fly ? Math.PI : 0;
+  limb(c, -8, -4, L(armBase + (fly ? -.5 : .22) + f2 * (fly ? .95 : 1), -.16 + h2), 13, pal.coat2, 4.8, pal.skin);
+  limb(c,  8, -4, L(armBase + (fly ? .5 : -.22) + f1 * (fly ? .95 : 1), .16 - h1), 13, pal.coat2, 4.8, pal.skin);
   c.fillStyle = pal.coat; rr(c, -9.5, -8, 19, 18, 5); c.fill();
   c.fillStyle = pal.coat2; c.fillRect(-1, -8, 2, 18);
   c.fillStyle = pal.patch; rr(c, 2.5, 1, 5.5, 5.5, 1.2); c.fill();
@@ -1242,7 +1249,7 @@ function drawHoboFlying(h, pal, sc) {
     ctx.fillStyle = '#5a5a66'; rr(ctx, h.x - 7 * sc, h.y + 3 * sc, 14 * sc, 13 * sc, 3); ctx.fill();   // the rocket pack
   }
   const rot = Math.sin(h.t * 6 + (h.who || 0)) * .35 + clamp(h.vx / 700, -.5, .5);
-  drawHobo(h.x, h.y, h.chute === 'open' ? rot * .3 : rot, h.t + (h.who || 0), pal, 'fly', sc, h.chute);
+  drawHobo(h.x, h.y, h.chute === 'open' ? rot * .3 : rot, h.t + (h.who || 0), pal, 'fly', sc, h.chute, h.cT);
 }
 
 const hash01 = k => { const v = Math.sin(k * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
