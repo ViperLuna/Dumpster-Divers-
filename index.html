@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.12.9', BUILD = '__BUILD__';
+const VERSION = '0.13.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -103,6 +103,7 @@ const MAX_LV = 25;
 const CLONE_CAP = 6;
 const HAZARD_AFTER = 15;          // hazards (the things that bump you around) only appear after this many bounces
 const CLONE_HOPS = Infinity;       // no cap: the hole keeps bouncing a clone back up until it misses and splats
+const CHUTE_TIME = 5;             // seconds a parachute stays up once it has opened
 const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
 const BUMP_WILD = 320, BUMP_WILD_CAP = 1150;   // odd obstacle hits: the extra shove and the speed limit (was 240 / 950)
@@ -487,7 +488,7 @@ function newRun() {
     closed: Math.random() < .5 ? 'L' : 'R',
     lid: { L: 0, R: 0 },
     jumper, inside: 1 - jumper, jumpT: 0,
-    air: null, clones: [], cloneIdx: 0,
+    air: null, clones: [], cloneIdx: 0, canopies: [],
     objs: [], parts: [], floats: [], hudFloats: [], splats: [],
     cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0, zone: 0, banner: null, newAch: [], toasts: [], toastT: 0, bolts: [],
     wideT: 0, netT: 0, turboT: 0, saver: false, saverUsed: false,
@@ -697,7 +698,8 @@ function applyPowerUp(id, h, isMain, ox, oy) {
       if (G.saver) dupBonus(ox, oy); else { G.saver = true; floatText(ox, oy - 14, 'COMBO SAVER!', '#9ad8ff'); sfx.powerup(); }
       break;
     case 'chute':
-      if (h.chute) dupBonus(ox, oy); else { h.chute = h.vy > 0 ? 'open' : 'armed'; floatText(ox, oy - 14, 'PARACHUTE!', '#9ad8ff'); sfx.chute(); }
+      if (h.chute === 'open') { h.cLeft = CHUTE_TIME; floatText(ox, oy - 14, 'CHUTE REFRESHED!', '#9ad8ff'); sfx.chute(); }   // a second one resets the timer
+      else if (h.chute) dupBonus(ox, oy); else { h.chute = h.vy > 0 ? 'open' : 'armed'; floatText(ox, oy - 14, 'PARACHUTE!', '#9ad8ff'); sfx.chute(); }
       break;
     case 'multi':
       if (!spawnClones(h)) dupBonus(ox, oy);
@@ -783,9 +785,15 @@ function physics(h, dt) {
   h.t += dt; h.cd = Math.max(0, h.cd - dt);
   if (h.chute === 'armed' && h.vy > 0) h.chute = 'open';
   if (h.chute === 'open') {                         // cT = seconds since the canopy popped open (drives the deploy animation)
-    if (h.cT == null) { h.cT = 0; burst(h.x, h.y - 34, 10, ['#fff', '#e8503a', '#ffe9e0'], 170, .45); }
+    if (h.cT == null) { h.cT = 0; h.cLeft = CHUTE_TIME; h.chuted = true; burst(h.x, h.y - 34, 10, ['#fff', '#e8503a', '#ffe9e0'], 170, .45); }
     else h.cT += dt;
-  } else h.cT = null;
+    h.cLeft -= dt;
+    h.vx *= Math.exp(-2.8 * dt);                    // under the canopy he steadies: sideways drift bleeds off, so he falls straight
+    if (h.cLeft <= 0) {                             // time's up: the canopy lets go and drifts away (he keeps the "used a chute" credit)
+      G.canopies.push({ x: h.x, y: h.y, vx: h.vx + rand(-50, 50), vy: -70, rot: 0, vr: rand(-1.3, 1.3), t: 0, k: (h.gs ? 1.05 : 1.3) / 1.3 });
+      h.chute = null; h.cT = null; h.cLeft = null;
+    }
+  } else { h.cT = null; h.cLeft = null; }
   if (h.thrust > 0) {                               // ROCKET BURN: gravity is off and he climbs at least THRUST_V; faster launches keep their speed
     h.thrust -= dt;
     if (h.vy > -THRUST_V) h.vy = -THRUST_V;
@@ -822,7 +830,7 @@ function touchObjects(h, isMain) {
     } else if (o.kind === 'boost') {                            // a rocket: burn for ST.burn seconds (a second one refreshes the timer)
       h.thrust = Math.max(h.thrust || 0, ST.burn);
       if (h.vy > -THRUST_V) h.vy = -THRUST_V;
-      h.chute = null; statAdd('rockets');
+      h.chute = null; h.chuted = false; statAdd('rockets');
       burst(o.x, o.y, 14, ['#ff9a4a', '#fff', '#ffe27a'], 240, .5); sfx.boost();
       floatText(o.x, o.y - 14, 'ROCKET!', '#ff9a4a');
       G.objs.splice(i, 1);
@@ -948,7 +956,7 @@ function updateMain(dt) {
         if (a.netRun) statAdd('netSaves');                  // bounced off the net, then landed in the dumpster
         if (G.saverUsed) statAdd('comboSaves');             // landed in the open flap during a combo save
         if (a.hazHit) statAdd('hazBounces');                // bumped by an obstacle earlier in this same flight
-        if (a.chute === 'open') statAdd('chute');
+        if (a.chuted) statAdd('chute');                       // opened a chute this flight (even if its 5 s ran out); a bonk, net bounce or rocket cancels it
         if (G.wideT > 0) statAdd('wide');
         if (G.turboT > 0) statAdd('turbo');
         if (G.saverUsed) { G.saver = false; G.saverUsed = false; floatText(a.x, DTOP - 66, 'SAVER USED', '#ffb347'); }
@@ -959,7 +967,7 @@ function updateMain(dt) {
       if (Math.abs(dc) <= f / 2 + 4) {              // landed on the closed flap
         // a bonk kicks him away from the dumpster, EXCEPT while he is sweeping along on the net: then he keeps his heading
         // (so he only ever turns around at the walls)
-        a.bonked = true; a.vy = -260; a.chute = null;
+        a.bonked = true; a.vy = -260; a.chute = null; a.chuted = false;
         a.vx = a.netRun ? (Math.sign(a.vx) || 1) * Math.max(Math.abs(a.vx), 140) : (dc < 0 ? -1 : 1) * 280;
         floatText(a.x, DTOP - 40, 'BONK!', '#ff9a7a'); sfx.bonk();
       }
@@ -975,7 +983,7 @@ function groundHit(a) {
     if (!a.netSpeed) a.netSpeed = rand(110, 200);
     const dir = a.netRun ? (Math.sign(a.vx) || 1) : (Math.random() < .5 ? -1 : 1);
     a.vx = dir * a.netSpeed; a.netRun = true;
-    a.bonked = false; a.chute = null;
+    a.bonked = false; a.chute = null; a.chuted = false;
     statAdd('netBounces'); a.hazN = 0;                  // every fresh bounce restarts the obstacle-hit count
     if (G.saver) { G.saverUsed = true; floatText(a.x, GROUND - 60, 'COMBO SAVED!', '#9ad8ff'); }   // keeps saving until he is back in the dumpster
     else G.streak = 0;
@@ -1071,6 +1079,7 @@ function update(dt) {
   for (let i = G.floats.length - 1; i >= 0; i--) { const f = G.floats[i]; f.life -= dt * 1.1; f.y -= 40 * dt; if (f.life <= 0) G.floats.splice(i, 1); }
   for (let i = G.hudFloats.length - 1; i >= 0; i--) { G.hudFloats[i].life -= dt; if (G.hudFloats[i].life <= 0) G.hudFloats.splice(i, 1); }
   for (let i = G.splats.length - 1; i >= 0; i--) { const s = G.splats[i]; s.t += dt; if (s.t > 3) G.splats.splice(i, 1); }
+  for (let i = G.canopies.length - 1; i >= 0; i--) { const q = G.canopies[i]; q.t += dt; q.vy += 160 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.rot += q.vr * dt; if (q.t > 1.4) G.canopies.splice(i, 1); }
 
   // clones live their own lives, on screen or off
   for (let i = G.clones.length - 1; i >= 0; i--) {
@@ -1128,17 +1137,21 @@ function limb(c, x0, y0, ang, len, col, wid, endCol) {
   c.fillStyle = endCol; c.beginPath(); c.arc(x1, y1, wid * .62, 0, 7); c.fill();
 }
 /* mode 'fly' = flailing arms and legs, 'stand' = idle. Same animation for every hobo; only the palette changes. */
-function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3, chute = null, cT = null, vy = 0) {
+function canopyShape(c, k) {
+  const cr = 30 * k;
+  c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1;
+  c.beginPath(); for (const q of [-1, -.35, .35, 1]) { c.moveTo(q * cr, -48 * k); c.lineTo(0, -12 * k); } c.stroke();
+  for (let i = 0; i < 4; i++) { c.fillStyle = i % 2 ? '#fff' : '#e8503a'; c.beginPath(); c.moveTo(-cr + i * cr / 2, -48 * k); c.arc(0, -48 * k, cr, Math.PI + i * Math.PI / 4, Math.PI + (i + 1) * Math.PI / 4); c.closePath(); c.fill(); }
+}
+function drawHobo(x, y, rot, tt, pal, mode, sc = 1.3, chute = null, cT = null, vy = 0, cL = null) {
   const c = ctx, fly = mode === 'fly';
   c.save(); c.translate(x, y);
   const u = chute === 'open' ? (cT == null ? 9 : cT) : 0;            // seconds since the canopy opened
   if (chute === 'open') {                           // parachute canopy: pops open from a small bundle, overshoots, then settles
     const e = u > 1 ? 1 : 1 - Math.exp(-7 * u) * Math.cos(16 * u), k = sc / 1.3;
     c.save(); c.translate(0, -12 * k); c.scale(.2 + .8 * e, .3 + .7 * e + (u < 1 ? Math.sin(u * 9) * .05 * (1 - u) : 0)); c.translate(0, 12 * k);
-    const cr = 30 * k;
-    c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1;
-    c.beginPath(); for (const q of [-1, -.35, .35, 1]) { c.moveTo(q * cr, -48 * k); c.lineTo(0, -12 * k); } c.stroke();
-    for (let i = 0; i < 4; i++) { c.fillStyle = i % 2 ? '#fff' : '#e8503a'; c.beginPath(); c.moveTo(-cr + i * cr / 2, -48 * k); c.arc(0, -48 * k, cr, Math.PI + i * Math.PI / 4, Math.PI + (i + 1) * Math.PI / 4); c.closePath(); c.fill(); }
+    if (cL != null && cL < 1 && Math.floor(cL * 9) % 2 === 0) c.globalAlpha = .3;     // last second: the canopy blinks
+    canopyShape(c, k);
     c.restore();
   } else if (chute === 'armed') {
     c.fillStyle = '#e8503a'; rr(c, -5, -10 * sc / 1.3, 10, 12, 3); c.fill();
@@ -1258,7 +1271,7 @@ function drawHoboFlying(h, pal, sc) {
     ctx.fillStyle = '#5a5a66'; rr(ctx, h.x - 7 * sc, h.y + 3 * sc, 14 * sc, 13 * sc, 3); ctx.fill();   // the rocket pack
   }
   const rot = Math.sin(h.t * 6 + (h.who || 0)) * .35 + clamp(h.vx / 700, -.5, .5);
-  drawHobo(h.x, h.y, h.chute === 'open' ? rot * .3 : rot, h.t + (h.who || 0), pal, 'fly', sc, h.chute, h.cT, h.vy);
+  drawHobo(h.x, h.y, h.chute === 'open' ? rot * .3 : rot, h.t + (h.who || 0), pal, 'fly', sc, h.chute, h.cT, h.vy, h.cLeft);
 }
 
 const hash01 = k => { const v = Math.sin(k * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
@@ -1352,6 +1365,9 @@ function drawWorld() {
   }
   for (const xx of xs) drawFlapsAt(xx);
 
+  for (const q of G.canopies) {                     // a cut-away canopy, tumbling off and fading
+    ctx.save(); ctx.globalAlpha = clamp(1 - q.t / 1.4, 0, 1); ctx.translate(q.x, q.y); ctx.rotate(q.rot); canopyShape(ctx, q.k * 1.3 / 1.3); ctx.restore();
+  }
   for (const c of G.clones) drawHoboFlying(c, c.pal, 1.05);
   if (G.air) drawHoboFlying(G.air, HOBOS[G.air.who].pal, 1.3);
   drawSplats();                                     // on top of the dumpster and the hobos, so a splat is always visible
@@ -1385,6 +1401,7 @@ function drawHud() {
   if (G.wideT > 0) bar('↔️', G.wideT / PU_TIME, '#9ad8ff');
   if (G.turboT > 0) bar('⚡', G.turboT / ST.turboTime, '#ffe27a');
   if (G.netT > 0) bar('🥅', G.netT / ST.netTime, '#9ad8ff');
+  if (G.air && G.air.chute === 'open' && G.air.cLeft > 0) bar('🪂', G.air.cLeft / CHUTE_TIME, '#e8503a');
   if (G.air && G.air.thrust > 0) bar('🚀', G.air.thrust / ST.burn, '#ff9a4a');
   if (G.saver) bar('🛡️', 1, G.saverUsed && Math.floor(G.time * 6) % 2 ? '#ffb347' : '#ffe27a');
   if (G.clones.length) bar('👥', G.clones.length / CLONE_CAP, '#c9a0ff');
