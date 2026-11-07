@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.12.7', BUILD = '__BUILD__';
+const VERSION = '0.12.8', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -1411,14 +1411,15 @@ function drawHud() {
   const vis = clamp((dumpTopScreen - (H - 40)) / 90, 0, 1);
   if (vis > 0 && G.phase !== 'ready') {
     const f = flap(), hc = wrapX(flapCenter(opp(G.closed))), y = H - 16;
+    // the whole shape (line + arrow tip) spans exactly the hole, so its middle is the middle of the hole
+    const dir = G.closed === 'L' ? -1 : 1, far = hc - dir * (f / 2 - 4), tip = hc + dir * (f / 2), base = tip - dir * 17;
     ctx.save(); ctx.globalAlpha = vis; ctx.lineCap = 'round';
     ctx.strokeStyle = 'rgba(255,207,74,.28)'; ctx.lineWidth = 18;
-    ctx.beginPath(); ctx.moveTo(hc - f / 2 + 4, y); ctx.lineTo(hc + f / 2 - 4, y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(far, y); ctx.lineTo(base, y); ctx.stroke();
     ctx.strokeStyle = '#ffcf4a'; ctx.lineWidth = 9;
-    ctx.beginPath(); ctx.moveTo(hc - f / 2 + 4, y); ctx.lineTo(hc + f / 2 - 4, y); ctx.stroke();
-    const dir = G.closed === 'L' ? -1 : 1, ex = hc + dir * (f / 2 - 4);         // an arrow tip on the end that faces the closed flap
-    ctx.fillStyle = '#ffcf4a'; ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = '#ffcf4a';
-    ctx.beginPath(); ctx.moveTo(ex + dir * 17, y); ctx.lineTo(ex + dir * 1, y - 11); ctx.lineTo(ex + dir * 1, y + 11); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(far, y); ctx.lineTo(base + dir * 2, y); ctx.stroke();
+    ctx.fillStyle = '#ffcf4a'; ctx.lineJoin = 'round'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(tip - dir * 1.5, y); ctx.lineTo(base, y - 11); ctx.lineTo(base, y + 11); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.restore();
   }
   drawBolts();
