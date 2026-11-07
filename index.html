@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.12.8', BUILD = '__BUILD__';
+const VERSION = '0.12.9', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -1420,6 +1420,11 @@ function drawHud() {
     ctx.beginPath(); ctx.moveTo(far, y); ctx.lineTo(base + dir * 2, y); ctx.stroke();
     ctx.fillStyle = '#ffcf4a'; ctx.lineJoin = 'round'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(tip - dir * 1.5, y); ctx.lineTo(base, y - 11); ctx.lineTo(base, y + 11); ctx.closePath(); ctx.fill(); ctx.stroke();
+    const cc = hc + dir * f;                        // the closed flap sits next to the hole; when it runs off an edge, show the half that wrapped to the far side
+    if (cc - f / 2 < 0 || cc + f / 2 > W) {
+      ctx.strokeStyle = 'rgba(190,196,214,.7)'; ctx.lineWidth = 9;
+      for (const o of [-W, 0, W]) { ctx.beginPath(); ctx.moveTo(cc + o - f / 2 + 4, y); ctx.lineTo(cc + o + f / 2 - 4, y); ctx.stroke(); }
+    }
     ctx.restore();
   }
   drawBolts();
