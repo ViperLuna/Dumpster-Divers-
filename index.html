@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.13.4', BUILD = '__BUILD__';
+const VERSION = '0.14.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -103,6 +103,9 @@ const MAX_LV = 25;
 const CLONE_CAP = 6;
 const HAZARD_AFTER = 15;          // hazards (the things that bump you around) only appear after this many bounces
 const CLONE_HOPS = Infinity;       // no cap: the hole keeps bouncing a clone back up until it misses and splats
+const JUNK_LO = 19000, JUNK_HI = 23000;            // the space-junk belt sits at 1,900-2,300 m (these are altitude in px)
+const JUNK_PREDICT = 17500, JUNK_N = 48;           // it appears once a flight is predicted to reach 1,750 m; this many pieces
+const JUNK_PUSH = 135, JUNK_DECAY = 2.4;           // a hit nudges him ~135 px/s, which bleeds off in about a second (a push of ~55 px in all)
 const CHUTE_TIME = 5;             // seconds a parachute stays up once it has opened
 const CLONE_GRAVITY = .7;         // clones fall at 70% gravity: a longer, floatier life
 const PU_TIME = 10;               // seconds for timed power-ups
@@ -315,6 +318,7 @@ const synth = {
   powerup()    { tone(520, .1, 'square', .06); tone(780, .1, 'square', .06, 0, .08); tone(1040, .2, 'square', .06, 0, .16); },
   dup()        { tone(700, .08, 'triangle', .06); tone(900, .1, 'triangle', .06, 0, .06); },
   hazard()     { tone(240, .2, 'sawtooth', .08, -120); },
+  junk()       { tone(1320, .08, 'square', .035); tone(1980, .06, 'triangle', .03, 0, .015); tone(700, .1, 'sawtooth', .018, -200, .01); },   // a metallic clink
   boost()      { tone(300, .3, 'sawtooth', .07, 700); },
   net()        { tone(220, .22, 'triangle', .1, 380); },
   smash()      { tone(180, .18, 'sawtooth', .09, -120); tone(520, .12, 'square', .06, 0, .02); },
@@ -488,7 +492,7 @@ function newRun() {
     closed: Math.random() < .5 ? 'L' : 'R',
     lid: { L: 0, R: 0 },
     jumper, inside: 1 - jumper, jumpT: 0,
-    air: null, clones: [], cloneIdx: 0, canopies: [],
+    air: null, clones: [], cloneIdx: 0, canopies: [], junk: [],
     objs: [], parts: [], floats: [], hudFloats: [], splats: [],
     cash: 0, streak: 0, bestStreak: 0, catches: 0, maxAlt: 0, zone: 0, banner: null, newAch: [], toasts: [], toastT: 0, bolts: [],
     wideT: 0, netT: 0, turboT: 0, saver: false, saverUsed: false,
@@ -836,6 +840,12 @@ function physics(h, dt) {
   if (h.thrust > 0 && G.parts.length < 400 && Math.random() < .55)          // exhaust trail
     G.parts.push({ x: h.x + rand(-5, 5), y: h.y + 16, vx: rand(-40, 40), vy: rand(80, 220), life: .45, max: .45, c: pick(['#ffb347', '#ff6a3d', '#ffe27a']), s: rand(3, 6) });
   h.x += h.vx * dt; h.y += h.vy * dt;
+  if (h.nx || h.ny) {                               // a space-junk nudge: pushes him a little, then slowly dies out so he settles back onto his line
+    h.x += (h.nx || 0) * dt; h.y += (h.ny || 0) * dt;
+    const k = Math.exp(-JUNK_DECAY * dt); h.nx *= k; h.ny *= k;
+    if (Math.abs(h.nx) < 1 && Math.abs(h.ny) < 1) h.nx = h.ny = 0;
+  }
+  if (h.spin) { h.spin *= Math.exp(-2.6 * dt); if (Math.abs(h.spin) < .01) h.spin = 0; }
   if (h.x < HR) { h.x = HR; h.vx = Math.abs(h.vx); }
   if (h.x > W - HR) { h.x = W - HR; h.vx = -Math.abs(h.vx); }
 }
@@ -897,6 +907,86 @@ function touchObjects(h, isMain) {
       floatText(h.x, h.y - 22, wild ? 'BUMP!' : 'soft bump', wild ? '#ff9a7a' : '#9ad8ff');
     }
   }
+  touchJunk(h, isMain);
+}
+
+/* ============================================================== space junk
+   A belt of tumbling metal, always drifting, 1,900-2,300 m up. It is NOT in capsules and the lightning ignores it.
+   It only nudges you: a small push away from the piece that bleeds off in about a second, or the next piece interrupts it.
+   A rocket just plows through: the piece is shoved aside and fades out. A parachute can still be hit. */
+function junkPiece(x, y) {
+  return { x, y, vx: (Math.random() < .5 ? -1 : 1) * rand(16, 46), vy: rand(-5, 5), rot: rand(0, 6.28), vr: rand(-.9, .9), r: rand(13, 25),
+           type: pick(['plate', 'plate', 'strut', 'panel', 'tank', 'dish']), pts: Array.from({ length: 7 }, () => rand(.7, 1.1)), cd: 0, out: -1 };
+}
+function peakAltOf(h) {                             // how high (px) this hobo will get if nothing else happens: current climb + remaining rocket + free flight
+  let alt = DTOP - h.y, up = Math.max(0, -h.vy);
+  if (h.thrust > 0) { up = Math.max(up, THRUST_V); alt += up * h.thrust; }
+  return alt + apexOf(up) / (h.gs || 1);
+}
+function updateJunk(dt) {
+  if (G.phase === 'over') return;
+  const flyers = G.air ? [G.air, ...G.clones] : G.clones;
+  if (!G.junk.length && flyers.some(h => peakAltOf(h) >= JUNK_PREDICT)) {      // someone may reach the belt: lay it out, well out of sight
+    for (let i = 0; i < JUNK_N * 3 && G.junk.length < JUNK_N; i++) {
+      const y = DTOP - rand(JUNK_LO, JUNK_HI), sy = y - G.camY;
+      if (sy < -120 || sy > H + 120) G.junk.push(junkPiece(rand(-40, W + 40), y));
+    }
+  }
+  for (let i = G.junk.length - 1; i >= 0; i--) {
+    const q = G.junk[i]; q.cd = Math.max(0, q.cd - dt); q.x += q.vx * dt; q.y += q.vy * dt; q.rot += q.vr * dt;
+    const top = DTOP - JUNK_HI, bot = DTOP - JUNK_LO;
+    if (q.y < top) q.vy = Math.abs(q.vy) + 2; else if (q.y > bot) q.vy = -Math.abs(q.vy) - 2;
+    if (q.out >= 0) {                              // shoved aside by a rocket: fades out, and a fresh piece drifts in from the edge to keep the belt full
+      q.out += dt;
+      if (q.out > .5) { G.junk.splice(i, 1); const n = junkPiece(Math.random() < .5 ? -45 : W + 45, clamp(q.y + rand(-300, 300), top, bot)); n.vx = Math.abs(n.vx) * (n.x < 0 ? 1 : -1); G.junk.push(n); }
+    } else if (q.x < -55) { q.x = W + 55; q.y = clamp(q.y + rand(-150, 150), top, bot); }
+    else if (q.x > W + 55) { q.x = -55; q.y = clamp(q.y + rand(-150, 150), top, bot); }
+  }
+}
+function touchJunk(h, isMain) {
+  for (const q of G.junk) {
+    if (q.out >= 0 || q.cd > 0) continue;
+    const dx = h.x - q.x, dy = h.y - q.y, rr = HR + q.r * .85;
+    if (dx * dx + dy * dy > rr * rr) continue;
+    let nx = dx, ny = dy; const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;      // points from the piece to the hobo
+    burst(q.x, q.y, 7, ['#e2e7f2', '#fff', '#8f98aa'], 200, .35);
+    if (h.thrust > 0) {                            // burning: he goes right through; the piece is shoved aside and fades
+      q.out = 0; q.vx = (nx >= 0 ? -1 : 1) * rand(160, 260); q.vy = rand(-30, 30); q.vr = rand(-5, 5);
+    } else {
+      const push = JUNK_PUSH * rand(.85, 1.15);
+      h.nx = clamp((h.nx || 0) + nx * push, -260, 260); h.ny = clamp((h.ny || 0) + ny * push * .55, -200, 200);
+      h.spin = clamp((h.spin || 0) + (nx >= 0 ? 1 : -1) * rand(.45, .85), -1.4, 1.4);
+      q.cd = .5; q.vx -= nx * 25; q.vr += rand(-1, 1);
+      if (isMain) { sfx.junk(); statAdd('junkHits'); }
+    }
+  }
+}
+function drawJunkPiece(q) {
+  const c = ctx, r = q.r, o = q.out >= 0 ? clamp(q.out / .5, 0, 1) : 0, sc = 1 - .45 * o;
+  c.save(); c.translate(q.x, q.y); c.rotate(q.rot); c.scale(sc, sc); c.globalAlpha = 1 - o; c.lineJoin = 'round'; c.lineCap = 'round';
+  const g = c.createLinearGradient(-r, -r, r, r); g.addColorStop(0, '#bcc4d2'); g.addColorStop(1, '#596277');
+  c.fillStyle = g; c.strokeStyle = '#262a35'; c.lineWidth = 2;
+  if (q.type === 'plate') {
+    c.beginPath(); q.pts.forEach((k, i) => { const a = i / q.pts.length * 6.283, x = Math.cos(a) * r * k, y = Math.sin(a) * r * k * .85; i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#2b2f3a'; for (const [dx, dy] of [[-.4, -.2], [.35, .1], [-.1, .4]]) { c.beginPath(); c.arc(dx * r, dy * r, 2, 0, 7); c.fill(); }
+    c.strokeStyle = 'rgba(255,255,255,.4)'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(-r * .5, -r * .5); c.lineTo(r * .1, -r * .6); c.stroke();
+  } else if (q.type === 'strut') {
+    rr(c, -r * 1.2, -3, r * 2.4, 6, 2); c.fill(); c.stroke(); rr(c, -r * .15, -r * .55, 6, r * 1.1, 2); c.fill(); c.stroke();
+    c.fillStyle = '#2b2f3a'; for (const dx of [-1.05, 1.05]) { c.beginPath(); c.arc(dx * r, 0, 1.8, 0, 7); c.fill(); }
+  } else if (q.type === 'panel') {
+    rr(c, -r, -r * .65, r * 2, r * 1.3, 2); c.fill(); c.stroke();
+    c.fillStyle = '#2f4f86'; const cw = (r * 2 - 6) / 3; for (let k = 0; k < 3; k++) c.fillRect(-r + 3 + k * cw, -r * .65 + 3, cw - 2, r * 1.3 - 6);
+    c.strokeStyle = 'rgba(160,200,255,.45)'; c.lineWidth = 1; c.beginPath(); c.moveTo(-r + 4, -r * .3); c.lineTo(r - 4, -r * .3); c.stroke();
+  } else if (q.type === 'tank') {
+    rr(c, -r, -r * .5, r * 2, r, r * .5); c.fill(); c.stroke();
+    c.strokeStyle = '#3a4152'; c.lineWidth = 1.6; c.beginPath(); c.moveTo(-r * .35, -r * .48); c.lineTo(-r * .35, r * .48); c.moveTo(r * .35, -r * .48); c.lineTo(r * .35, r * .48); c.stroke();
+    c.fillStyle = '#3a4152'; c.beginPath(); c.moveTo(r, -r * .2); c.lineTo(r + 6, -r * .35); c.lineTo(r + 6, r * .35); c.lineTo(r, r * .2); c.closePath(); c.fill();
+  } else {
+    c.beginPath(); c.arc(0, 0, r * .75, 0, Math.PI); c.closePath(); c.fill(); c.stroke();
+    c.strokeStyle = '#262a35'; c.lineWidth = 2; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, -r * .9); c.stroke();
+    c.fillStyle = '#ff6b5a'; c.beginPath(); c.arc(0, -r * .9, 2.2, 0, 7); c.fill();
+  }
+  c.restore();
 }
 
 /* ============================================================== main hobo, launching and landing */
@@ -1094,6 +1184,7 @@ function update(dt) {
     o.y = o.y0 + Math.sin(o.age * o.bobF + o.ph) * o.bobA;
     if (o.x < -70 || o.x > W + 70) G.objs.splice(i, 1);
   }
+  updateJunk(dt);
   if (G.phase !== 'over') {
     G.spawnT -= dt;
     if (G.spawnT <= 0) {
@@ -1302,7 +1393,7 @@ function drawHoboFlying(h, pal, sc) {
     ctx.fillStyle = '#5a5a66'; rr(ctx, h.x - 7 * sc, h.y + 3 * sc, 14 * sc, 13 * sc, 3); ctx.fill();   // the rocket pack
   }
   const rot = Math.sin(h.t * 6 + (h.who || 0)) * .35 + clamp(h.vx / 700, -.5, .5);
-  drawHobo(h.x, h.y, h.chute === 'open' ? rot * .3 : rot, h.t + (h.who || 0), pal, 'fly', sc, h.chute, h.cT, h.vy, h.cLeft);
+  drawHobo(h.x, h.y, (h.chute === 'open' ? rot * .3 : rot) + (h.spin || 0), h.t + (h.who || 0), pal, 'fly', sc, h.chute, h.cT, h.vy, h.cLeft);
 }
 
 const hash01 = k => { const v = Math.sin(k * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
@@ -1345,6 +1436,7 @@ function drawWorld() {
   if (altTop > 600 && altBot < 3200) drawClouds(altBot, altTop);
   ctx.drawImage(bg, 0, 0, W, H);
 
+  for (const q of G.junk) { const sy = q.y - G.camY; if (sy > -60 && sy < H + 60) drawJunkPiece(q); }       // the space-junk belt sits behind the loot
   // pooled objects: junk by rarity (rarer on top), then power-ups, then bumpers
   const sorted = G.objs.filter(o => !o.dead).sort((a, b) => a.tier - b.tier);
   for (const o of sorted) { const sy = o.y - G.camY; if (sy > -70 && sy < H + 70) drawObj(o); }
