@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.14.1', BUILD = '__BUILD__';
+const VERSION = '0.14.2', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -557,6 +557,7 @@ const ACH_CATS = [
   numCat('bolt',    'Lightning Strikes',      'lightning',   ONE_TEN, n => `Catch ${money(n)} lightning capsule${n === 1 ? '' : 's'}`),
   numCat('bolthit', 'Lightning Item Hits',    'boltItems',   ROUTINE, n => `Lightning takes ${money(n)} items`),
   numCat('height',  'Height',                 'height',      HEIGHT_MILESTONES, n => `Fly ${fmtHeight(n)} high`, fmtHeight),
+  numCat('junk',    'Space Junk Hits',        'junkHits',    [1, 10, 100, 1000, 10000, 100000], n => `Get knocked by space junk ${money(n)} time${n === 1 ? '' : 's'}`),
   { id: 'special', name: 'Special', items: [
     { id: 'leap', label: 'One Giant Leap', short: 'One Giant Leap', desc: 'Reach the moon' },
     { id: 'ufo:1', label: 'UFO Contact', short: 'UFO Contact', desc: 'Touch a UFO' },
@@ -1626,16 +1627,20 @@ function startFromTitle() {
 }
 document.getElementById('start').addEventListener('click', startFromTitle);
 /* The achievements page: one collapsible row per category, showing the next goal with a progress bar; tap to see every tier. */
+function upLevel(it) {                              // for a "Maxed ..." row: where that upgrade is right now
+  if (!it.id.startsWith('maxup:')) return '';
+  const u = UPGRADES.find(x => x.id === it.id.slice(6)); return u ? ` · now ${S[u.id] || 0} / ${u.max}` : '';
+}
 function showAchievements() {
   menuOpen = true; title.classList.add('hidden'); overlay.classList.remove('hidden');
   const cats = ACH_CATS.map(c => {
     const done = c.items.filter(it => S.ach[it.id]).length, next = c.items.find(it => !S.ach[it.id]);
     const cur = c.counter ? (S.stats[c.counter] || 0) : 0;
-    const pct = next && c.counter ? clamp(cur / next.need * 100, 0, 100) : (done === c.items.length ? 100 : 0);
-    const goal = !next ? 'All done! 🎉' : (c.counter ? `Next: ${next.short} (${money(cur)} / ${money(next.need)})` : `Next: ${next.short}`);
+    const pct = c.counter ? (next ? clamp(cur / next.need * 100, 0, 100) : 100) : done / c.items.length * 100;
+    const goal = !next ? 'All done! 🎉' : (c.counter ? `Next: ${next.short} (${money(cur)} / ${money(next.need)})` : `${done} of ${c.items.length} done`);
     return `<details class="achcat${done === c.items.length ? ' complete' : ''}"><summary><div class="achhead"><b>${c.name}</b><span>${done}/${c.items.length}</span></div>
       <div class="bar"><i style="width:${pct}%"></i></div><div class="lv">${goal}</div></summary>
-      ${c.items.map(it => `<div class="it ${S.ach[it.id] ? 'done' : 'lock'}"><b>${S.ach[it.id] ? '✓' : '🔒'} ${it.short}</b><small>${it.desc}</small></div>`).join('')}</details>`;
+      ${c.items.map(it => `<div class="it ${S.ach[it.id] ? 'done' : 'lock'}"><b>${S.ach[it.id] ? '✓' : '🔒'} ${it.short}</b><small>${it.desc}${upLevel(it)}</small></div>`).join('')}</details>`;
   }).join('');
   card.innerHTML = `<h1>🏆 ACHIEVEMENTS</h1><p class="sub"><b>${achCount()}</b> of ${ACH_ALL.length} unlocked · stats count from the day this feature shipped</p>${cats}
     <button class="go" id="achBack">BACK</button>`;
