@@ -794,10 +794,13 @@ function drawBolts() {                              // drawn on the screen (not 
     ctx.shadowBlur = 0;
     for (const g of B.ghosts || []) {                 // what the bolt destroyed stays put and fades out with it: flickers between normal and negative, then glows as a negative
       const on = flash && Math.floor(t * 45) % 2 === 0;
-      ctx.globalAlpha = halo * .35; ctx.fillStyle = 'rgba(170,150,255,1)'; ctx.beginPath(); ctx.arc(g.x, g.y, g.sz * .85, 0, 7); ctx.fill();   // violet glow disc
+      const gr = ctx.createRadialGradient(g.x, g.y, g.sz * .2, g.x, g.y, g.sz * 1.05);                                               // electric-blue halo
+      gr.addColorStop(0, 'rgba(150,215,255,.75)'); gr.addColorStop(.55, 'rgba(70,160,255,.5)'); gr.addColorStop(1, 'rgba(40,110,255,0)');
+      ctx.globalAlpha = halo; ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(g.x, g.y, g.sz * 1.05, 0, 7); ctx.fill();
+      ctx.strokeStyle = `rgba(160,225,255,${(on ? .95 : .7) * halo})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(g.x, g.y, g.sz * (on ? .78 : .72), 0, 7); ctx.stroke();   // a crackling ring
       ctx.globalAlpha = halo;
       if (on) { ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `${g.sz}px ${EMOJI_FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(g.e, g.x, g.y); ctx.textBaseline = 'alphabetic'; }
-      else { ctx.shadowColor = 'rgba(190,175,255,.95)'; ctx.shadowBlur = 16; const w = g.neg.width / 2; ctx.drawImage(g.neg, g.x - w / 2, g.y - w / 2, w, w); ctx.shadowBlur = 0; }
+      else { ctx.shadowColor = 'rgba(90,185,255,1)'; ctx.shadowBlur = 18; const w = g.neg.width / 2; ctx.drawImage(g.neg, g.x - w / 2, g.y - w / 2, w, w); ctx.shadowBlur = 0; }
       ctx.textAlign = 'center'; ctx.font = '900 16px system-ui'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.lineJoin = 'round';
       const tw = ctx.measureText(g.txt).width, tx = clamp(g.x, tw / 2 + 4, W - tw / 2 - 4);
       ctx.strokeText(g.txt, tx, g.ty); ctx.fillStyle = g.col; ctx.fillText(g.txt, tx, g.ty);
