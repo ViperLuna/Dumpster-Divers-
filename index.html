@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.13.3', BUILD = '__BUILD__';
+const VERSION = '0.13.4', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -801,6 +801,7 @@ function drawBolts() {                              // drawn on the screen (not 
       ctx.globalAlpha = halo;
       if (on) { ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `${g.sz}px ${EMOJI_FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(g.e, g.x, g.y); ctx.textBaseline = 'alphabetic'; }
       else { ctx.shadowColor = 'rgba(90,185,255,1)'; ctx.shadowBlur = 18; const w = g.neg.width / 2; ctx.drawImage(g.neg, g.x - w / 2, g.y - w / 2, w, w); ctx.shadowBlur = 0; }
+      ctx.globalAlpha = clamp(1 - (t - .72) / .6, 0, 1);                                           // the labels hold at full strength .5 s longer than the picture, then fade
       ctx.textAlign = 'center'; ctx.font = '900 16px system-ui'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.lineJoin = 'round';
       const tw = ctx.measureText(g.txt).width, tx = clamp(g.x, tw / 2 + 4, W - tw / 2 - 4);
       ctx.strokeText(g.txt, tx, g.ty); ctx.fillStyle = g.col; ctx.fillText(g.txt, tx, g.ty);
@@ -1086,7 +1087,7 @@ function update(dt) {
 
   if (G.objs.some(o => o.dead)) G.objs = G.objs.filter(o => !o.dead);          // things a lightning bolt took
   for (const B of G.bolts) B.t += dt;
-  if (G.bolts.length && G.bolts[0].t > .9) G.bolts.shift();
+  if (G.bolts.length && G.bolts[0].t > 1.4) G.bolts.shift();          // (the price labels outlast the bolt itself by half a second)
   // everything in the air flies in from the side and flies out the other
   for (let i = G.objs.length - 1; i >= 0; i--) {
     const o = G.objs[i]; o.age += dt; o.cd = Math.max(0, o.cd - dt); o.x += o.vx * dt;
