@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.14.0', BUILD = '__BUILD__';
+const VERSION = '0.14.1', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -318,7 +318,6 @@ const synth = {
   powerup()    { tone(520, .1, 'square', .06); tone(780, .1, 'square', .06, 0, .08); tone(1040, .2, 'square', .06, 0, .16); },
   dup()        { tone(700, .08, 'triangle', .06); tone(900, .1, 'triangle', .06, 0, .06); },
   hazard()     { tone(240, .2, 'sawtooth', .08, -120); },
-  junk()       { tone(1320, .08, 'square', .035); tone(1980, .06, 'triangle', .03, 0, .015); tone(700, .1, 'sawtooth', .018, -200, .01); },   // a metallic clink
   boost()      { tone(300, .3, 'sawtooth', .07, 700); },
   net()        { tone(220, .22, 'triangle', .1, 380); },
   smash()      { tone(180, .18, 'sawtooth', .09, -120); tone(520, .12, 'square', .06, 0, .02); },
@@ -331,6 +330,16 @@ const synth = {
 };
 const sfx = {};
 for (const k of Object.keys(synth)) sfx[k] = () => { if (!playFile(k)) synth[k](); };
+/* Space-junk clink: every piece rings differently. The kind of piece sets the pitch and how long it rings, its size shifts it
+   (small = higher, big = lower), and a little randomness keeps two of the same kind from sounding identical. */
+const CLINK = { plate: [1150, .09], strut: [1850, .16], panel: [880, .07], tank: [520, .2], dish: [1450, .12] };
+function junkClink(q) {
+  if (playFile('junk')) return;                                              // (a real recorded sound can still replace it, like the others)
+  const [base, ring] = CLINK[q.type] || CLINK.plate, f = base * clamp(22 / q.r, .78, 1.35) * rand(.94, 1.06);
+  tone(f, ring, 'square', .03);                                              // the strike
+  tone(f * 1.5, ring * .8, 'triangle', .03, 0, .012);                        // a bright overtone
+  tone(Math.min(f * 2.76, 4200), ring * .5, 'sine', .022, 0, .006);                          // an out-of-tune partial is what makes it sound like metal
+}
 
 /* Sound banks: an effect with several recorded variations (sounds/<name>1.mp3 .. <name>4.mp3). Each time it fires, one is picked at random
    (never the same twice in a row), plays all the way through, and ones that land close together simply layer. They are decoded into the audio
@@ -957,7 +966,7 @@ function touchJunk(h, isMain) {
       h.nx = clamp((h.nx || 0) + nx * push, -260, 260); h.ny = clamp((h.ny || 0) + ny * push * .55, -200, 200);
       h.spin = clamp((h.spin || 0) + (nx >= 0 ? 1 : -1) * rand(.45, .85), -1.4, 1.4);
       q.cd = .5; q.vx -= nx * 25; q.vr += rand(-1, 1);
-      if (isMain) { sfx.junk(); statAdd('junkHits'); }
+      if (isMain) { junkClink(q); statAdd('junkHits'); }
     }
   }
 }
