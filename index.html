@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.13.2', BUILD = '__BUILD__';
+const VERSION = '0.13.3', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -735,28 +735,43 @@ function boltDist(bolt, px, py) {
   for (const poly of [bolt.pts, ...bolt.branches]) for (let i = 0; i < poly.length - 1; i++) d = Math.min(d, segDist(px, py, poly[i], poly[i + 1]));
   return d;
 }
+const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+function negEmoji(e, sz) {                          // the emoji with every colour inverted (a photo-negative), on its own little canvas
+  const K = 2, S = Math.ceil(sz * 1.7 * K), cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const c = cv.getContext('2d'); c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `${sz * K}px ${EMOJI_FONT}`;
+  c.fillStyle = '#fff'; c.fillText(e, S / 2, S / 2);
+  c.globalCompositeOperation = 'difference'; c.fillStyle = '#fff'; c.fillRect(0, 0, S, S);        // invert every colour...
+  c.globalCompositeOperation = 'destination-in'; c.fillText(e, S / 2, S / 2);                       // ...but keep only the emoji's own shape
+  return cv;
+}
 function strikeLightning(h, isMain, ox, oy) {
   const camY = G.camY;
   const visible = G.objs.filter(o => !o.dead && o.y - camY > -24 && o.y - camY < H + 24 && o.x > -10 && o.x < W + 10);
   const touches = (bolt, o) => boltDist(bolt, o.x, o.y - camY) <= BOLT_R + o.r * .4;
   let best = null, bestN = -1;                      // "random", but the best of three tries, so a rare capsule is rarely wasted
   for (let k = 0; k < 3; k++) { const b = boltPath(rand(40, W - 40)), n = visible.filter(o => touches(b, o)).length; if (n > bestN) { best = b; bestN = n; } }
+  const makeGhost = (o, txt, col) => { const sz = o.kind === 'pu' ? 24 : o.r * 2; return { x: o.x, y: o.y - camY, sz, e: o.e, neg: negEmoji(o.e, sz), txt, col, ty: o.y - camY - sz / 2 - 6 }; };
   let hits = 0; const ghosts = [];                  // what the bolt destroyed, pinned to the screen where it was, fading out with the bolt
   for (const o of visible) {
     if (!touches(best, o)) continue;
     if (o.kind === 'item') {
-      const gain = Math.round(earn(o.v * multiplier())); ghosts.push({ x: o.x, y: o.y - camY, e: o.e, r: o.r, txt: `+$${gain}` });
+      const gain = Math.round(earn(o.v * multiplier())); ghosts.push(makeGhost(o, `+$${gain}`, '#cfc6ff'));
       statAdd('items'); statAdd('boltItems');                  // counts as an item collected, and as an item the lightning hit
       if (!isMain) hudFloat(`+$${gain}`, '#cfc6ff');
     } else if (o.kind === 'pu' && o.id !== 'bolt') {   // (a bolt capsule is never chained)
-      applyPowerUp(o.id, h, isMain, o.x, o.y);
+      const n0 = G.floats.length; applyPowerUp(o.id, h, isMain, o.x, o.y);
+      const said = G.floats.splice(n0);                // its floating text ("SAFETY NET!" etc.) moves onto the bolt with the rest
+      if (said.length) ghosts.push(makeGhost(o, said.map(f => f.txt).join(' + '), said[0].col));
     } else if (o.kind === 'haz') {                      // destroyed, like a rocket smash
-      const gain = Math.round(earn(10 * (1 + zoneAt(DTOP - o.y)))); ghosts.push({ x: o.x, y: o.y - camY, e: o.e, r: o.r, txt: `ZAP! +$${gain}` });
+      const gain = Math.round(earn(10 * (1 + zoneAt(DTOP - o.y)))); ghosts.push(makeGhost(o, `ZAP! +$${gain}`, '#cfc6ff'));
     } else continue;
     burst(o.x, o.y, 14, ['#cfc6ff', '#fff', '#8fa8ff'], 240, .5); o.dead = true; hits++;
   }
   if (!hits) { const g = Math.round(earn(5)); floatText(ox, oy - 20, `ZAP! nothing in the way  +$${g}`, '#cfc6ff'); hudFloat(`+$${g} bonus`, '#cfc6ff'); }
   else floatText(ox, oy - 20, `LIGHTNING! ${hits} hit${hits === 1 ? '' : 's'}`, '#cfc6ff');
+  ghosts.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < ghosts.length; i++) for (let j = 0; j < i; j++)         // nudge a price up if it would land on top of another one
+    if (Math.abs(ghosts[i].x - ghosts[j].x) < 100 && Math.abs(ghosts[i].ty - ghosts[j].ty) < 18) { ghosts[i].ty = ghosts[j].ty - 18; j = -1; }
   G.bolts.push({ bolt: best, t: 0, ghosts });
   G.shake = Math.max(G.shake, .45); sfx.bolt();
 }
@@ -777,12 +792,15 @@ function drawBolts() {                              // drawn on the screen (not 
       }
     }
     ctx.shadowBlur = 0;
-    for (const g of B.ghosts || []) {                 // the destroyed items and their prices stay put and fade out together with the bolt
+    for (const g of B.ghosts || []) {                 // what the bolt destroyed stays put and fades out with it: flickers between normal and negative, then glows as a negative
+      const on = flash && Math.floor(t * 45) % 2 === 0;
+      ctx.globalAlpha = halo * .35; ctx.fillStyle = 'rgba(170,150,255,1)'; ctx.beginPath(); ctx.arc(g.x, g.y, g.sz * .85, 0, 7); ctx.fill();   // violet glow disc
       ctx.globalAlpha = halo;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `${g.r * 2}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-      ctx.fillStyle = '#fff'; ctx.fillText(g.e, g.x, g.y);
-      ctx.textBaseline = 'alphabetic'; ctx.font = '900 16px system-ui'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.lineJoin = 'round';
-      ctx.strokeText(g.txt, g.x, g.y - g.r - 6); ctx.fillStyle = '#cfc6ff'; ctx.fillText(g.txt, g.x, g.y - g.r - 6);
+      if (on) { ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `${g.sz}px ${EMOJI_FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(g.e, g.x, g.y); ctx.textBaseline = 'alphabetic'; }
+      else { ctx.shadowColor = 'rgba(190,175,255,.95)'; ctx.shadowBlur = 16; const w = g.neg.width / 2; ctx.drawImage(g.neg, g.x - w / 2, g.y - w / 2, w, w); ctx.shadowBlur = 0; }
+      ctx.textAlign = 'center'; ctx.font = '900 16px system-ui'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.lineJoin = 'round';
+      const tw = ctx.measureText(g.txt).width, tx = clamp(g.x, tw / 2 + 4, W - tw / 2 - 4);
+      ctx.strokeText(g.txt, tx, g.ty); ctx.fillStyle = g.col; ctx.fillText(g.txt, tx, g.ty);
     }
     ctx.restore();
   }
