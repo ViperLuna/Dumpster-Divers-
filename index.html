@@ -66,7 +66,7 @@
   .verline { opacity:.7; font-size:.95em; }
   #mute, #pause, #cog { position:absolute; top:.5em; z-index:5; width:2.2em; height:2.2em; padding:0; font-size:1.2em; line-height:2.2em; text-align:center;
     background:rgba(0,0,0,.45); color:#fff; box-shadow:none; border-radius:.5em; }
-  #mute { right:.5em; } #pause { right:2.95em; } #cog { right:5.4em; }
+  #pause { right:.5em; } #mute { right:2.95em; } #cog { right:5.4em; }
   #pause.hidden { display:none; }
   .set { text-align:left; background:rgba(255,255,255,.06); border-radius:.7em; padding:.7em .8em; margin:.55em 0; }
   .set b { display:block; font-size:1.1em; } .set small { display:block; opacity:.75; font-size:.82em; margin:.15em 0 .5em; }
@@ -101,7 +101,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.16.0', BUILD = '__BUILD__';
+const VERSION = '0.16.1', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
