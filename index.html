@@ -91,7 +91,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.14.2', BUILD = '__BUILD__';
+const VERSION = '0.15.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -135,7 +135,7 @@ const CLONE_PALS = [
 
 /* ============================================================== save data */
 const SAVE_KEY = 'dumpsterDivers.v3';
-let S = { cash: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, turbo: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, stats: {}, achBackfill: false, prestige: 0, muted: false };
+let S = { cash: 0, value: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, turbo: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, stats: {}, achBackfill: false, prestige: 0, muted: false };
 try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) {}
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
 
@@ -145,6 +145,7 @@ function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } cat
 // 3 h to 50%, ~30 h to 100%. The exponent COST_P < 1 front-loads the price a little, so the early game isn't instant.
 const COST_P = .45;
 const UPGRADES = [
+  { id: 'value',  name: 'Item Value',     desc: 'Everything you collect is worth more',                      max: 50,  base: 40, top: 400000 },
   { id: 'speed',  name: 'Dumpster Speed',  desc: 'Gets moving sooner and goes a bit faster',                  max: 60,  base: 35, top: 90000 },
   { id: 'height', name: 'Launch Height',   desc: 'Raises how high the bounces can build up to',               max: 100, base: 50, top: 750000 },
   { id: 'hole',   name: 'Bigger Dumpster', desc: 'A wider dumpster is easier to land in, but edge landings fling wilder', max: 40, base: 30, top: 45000 },
@@ -153,6 +154,8 @@ const UPGRADES = [
   { id: 'turbo',  name: 'Turbo Time',      desc: 'Turbo Dumpster (instant steering) lasts longer',            max: 40,  base: 35, top: 45000 },
 ];
 const costOf = u => Math.round(u.base * Math.pow(u.top / u.base, Math.pow((S[u.id] || 0) / (u.max - 1), COST_P)));
+const VALUE_STEP = .18;                       // Item Value: +18% per level, so x10 at level 50 (loot only; it resets with prestige)
+const itemValue = () => 1 + VALUE_STEP * (S.value || 0);
 const burnOf = lv => .5 + .1 * lv;            // rocket burn seconds: 0.5 s -> 5.0 s over 45 upgrades
 const netOf  = lv => 10 + .5 * lv;            // safety net seconds: 10 s -> 30 s over 40 upgrades
 const turboOf = lv => 5 + .25 * lv;           // turbo dumpster seconds: 5 s -> 15 s over 40 upgrades
@@ -769,7 +772,7 @@ function strikeLightning(h, isMain, ox, oy) {
   for (const o of visible) {
     if (!touches(best, o)) continue;
     if (o.kind === 'item') {
-      const gain = Math.round(earn(o.v * multiplier())); ghosts.push(makeGhost(o, `+$${gain}`, '#cfc6ff'));
+      const gain = Math.round(earn(o.v * itemValue() * multiplier())); ghosts.push(makeGhost(o, `+$${gain}`, '#cfc6ff'));
       statAdd('items'); statAdd('boltItems');                  // counts as an item collected, and as an item the lightning hit
       if (!isMain) hudFloat(`+$${gain}`, '#cfc6ff');
     } else if (o.kind === 'pu' && o.id !== 'bolt') {   // (a bolt capsule is never chained)
@@ -867,7 +870,7 @@ function touchObjects(h, isMain) {
     const dx = o.x - h.x, dy = o.y - h.y, rr = HR + o.r - 4;
     if (dx * dx + dy * dy > rr * rr) continue;
     if (o.kind === 'item') {
-      const gain = Math.round(earn(o.v * (isMain ? multiplier() : 1))); statAdd('items');
+      const gain = Math.round(earn(o.v * itemValue() * (isMain ? multiplier() : 1))); statAdd('items');
       floatText(o.x, o.y - 10, `+$${gain}`, isMain ? '#7dffa0' : '#c8ffda');
       if (!isMain) hudFloat(`+$${gain}`, '#c8ffda');
       burst(o.x, o.y, 10, ['#ffe27a', '#fff', '#7dffa0'], 200, .5);
@@ -1647,6 +1650,7 @@ function showAchievements() {
   card.scrollTop = 0;
 }
 function rowNote(u, lv) {
+  if (u.id === 'value') return `loot is worth ×${(1 + VALUE_STEP * lv).toFixed(2)}`;
   if (u.id === 'height') return `bounces build up to ~${money(apexOf(launchMax(lv)) / 10)} m`;
   if (u.id === 'rocket') return `rockets burn ${burnOf(lv).toFixed(1)} s`;
   if (u.id === 'net') return `net lasts ${netOf(lv).toFixed(1)} s`;
