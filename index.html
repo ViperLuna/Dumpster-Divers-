@@ -64,13 +64,23 @@
   details.achcat .it.done b { color:#7dffa0; } details.achcat .it.lock { opacity:.6; }
   #title .ver { position:absolute; left:0; right:0; bottom:.7em; text-align:center; font-size:.8em; color:#fff; opacity:.75; text-shadow:0 .1em .3em #000, 0 0 .5em #000; letter-spacing:.03em; }
   .verline { opacity:.7; font-size:.95em; }
-  #mute { position:absolute; right:.6em; top:.6em; z-index:5; padding:.3em .55em; font-size:1.2em; background:rgba(0,0,0,.45);
-    color:#fff; box-shadow:none; border-radius:.5em; }
+  #mute, #pause, #cog { position:absolute; top:.5em; z-index:5; width:2.2em; height:2.2em; padding:0; font-size:1.2em; line-height:2.2em; text-align:center;
+    background:rgba(0,0,0,.45); color:#fff; box-shadow:none; border-radius:.5em; }
+  #mute { right:.5em; } #pause { right:2.95em; } #cog { right:5.4em; }
+  #pause.hidden { display:none; }
+  .set { text-align:left; background:rgba(255,255,255,.06); border-radius:.7em; padding:.7em .8em; margin:.55em 0; }
+  .set b { display:block; font-size:1.1em; } .set small { display:block; opacity:.75; font-size:.82em; margin:.15em 0 .5em; }
+  .set textarea { width:100%; box-sizing:border-box; font:inherit; font-size:.8em; line-height:1.3; color:var(--ink); background:rgba(0,0,0,.4); border:.1em solid rgba(255,255,255,.2);
+    border-radius:.5em; padding:.5em; resize:none; word-break:break-all; -webkit-user-select:text; user-select:text; touch-action:auto; }
+  .btnrow { display:flex; gap:.6em; margin-top:.5em; } .btnrow button { flex:1; font-size:.95em; padding:.55em .4em; }
+  .setmsg { min-height:1.4em; margin:.4em 0 0; font-weight:700; color:#7dffa0; } .setmsg.err { color:#ff9a7a; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <canvas id="cv" width="450" height="800"></canvas>
+  <button id="cog" title="Settings" aria-label="Settings">⚙️</button>
+  <button id="pause" class="hidden" title="Pause" aria-label="Pause">⏸</button>
   <button id="mute" title="Sound on/off" aria-label="Toggle sound">🔊</button>
   <div id="overlay" class="hidden"><div class="card" id="card"></div></div>
   <div id="title">
@@ -91,7 +101,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.15.0', BUILD = '__BUILD__';
+const VERSION = '0.16.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -135,7 +145,8 @@ const CLONE_PALS = [
 
 /* ============================================================== save data */
 const SAVE_KEY = 'dumpsterDivers.v3';
-let S = { cash: 0, value: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, turbo: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, stats: {}, achBackfill: false, prestige: 0, muted: false };
+const SAVE_DEFAULTS = { cash: 0, value: 0, speed: 0, height: 0, hole: 0, rocket: 0, net: 0, turbo: 0, bestCash: 0, bestAlt: 0, bestZone: 0, zonesClaimed: [], ach: {}, stats: {}, achBackfill: false, prestige: 0, muted: false };
+let S = JSON.parse(JSON.stringify(SAVE_DEFAULTS));
 try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) {}
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} }
 
@@ -492,7 +503,7 @@ const pick = arr => arr[(Math.random() * arr.length) | 0];
 
 /* ============================================================== run state */
 let G = null, ST = stats();
-let menuOpen = true, paused = false;
+let menuOpen = true, paused = false, settingsOpen = false, settingsFrom = null;
 let lastResult = null;
 
 function newRun() {
@@ -599,14 +610,15 @@ function begin() {
 }
 window.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || e.buttons) target = toLogicalX(e); });
 window.addEventListener('pointerdown', e => {
-  if (e.target.closest && e.target.closest('#mute')) return;
-  if (menuOpen) return;
+  if (e.target.closest && e.target.closest('#mute, #pause, #cog')) return;
+  if (menuOpen || settingsOpen) return;
   if (paused) { paused = false; return; }
   target = toLogicalX(e); keyDir = 0; keys.left = keys.right = false;
   begin();
 });
 const LEFTS = ['ArrowLeft', 'a', 'A'], RIGHTS = ['ArrowRight', 'd', 'D'];
 window.addEventListener('keydown', e => {
+  if (settingsOpen) { if (e.key === 'Escape') closeSettings(); return; }     // (typing a save code must never start the game)
   if (menuOpen) {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.tagName !== 'BUTTON') { e.preventDefault(); if (titleOpen()) startFromTitle(); else startRun(); }
     return;
@@ -1728,6 +1740,101 @@ function startRun() {
   menuOpen = false; overlay.classList.add('hidden');
 }
 
+/* ============================================================== pause button, settings, export / import */
+const pauseBtn = document.getElementById('pause'), cogBtn = document.getElementById('cog');
+const canPause = () => !!G && !menuOpen && !settingsOpen && G.phase !== 'over';
+pauseBtn.addEventListener('click', e => { e.stopPropagation(); if (canPause()) paused = !paused; audio(); });
+function paintPause() {
+  pauseBtn.classList.toggle('hidden', !canPause());
+  const t = paused ? '▶' : '⏸'; if (pauseBtn.textContent !== t) { pauseBtn.textContent = t; pauseBtn.title = paused ? 'Resume' : 'Pause'; }
+}
+
+const exportCode = () => 'DD1.' + btoa(JSON.stringify(S));
+function parseSaveCode(txt) {                        // turns a pasted code back into a clean save, or throws a message a person can read
+  txt = String(txt || '').replace(/\s+/g, '');
+  if (!txt) throw new Error('Paste a save code first.');
+  if (!txt.startsWith('DD1.')) throw new Error('That does not look like a Dumpster Divers save code.');
+  let obj; try { obj = JSON.parse(atob(txt.slice(4))); } catch (e) { throw new Error('That code is damaged. Try copying it again.'); }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('That code is damaged. Try copying it again.');
+  const out = {};
+  for (const k of Object.keys(SAVE_DEFAULTS)) {
+    if (k === 'muted' || !(k in obj)) continue;                          // (sound on/off is a per-device choice, so it is never imported)
+    const d = SAVE_DEFAULTS[k], v = obj[k];
+    if (typeof d === 'number') { if (typeof v === 'number' && isFinite(v) && v >= 0) out[k] = v; }
+    else if (typeof d === 'boolean') { if (typeof v === 'boolean') out[k] = v; }
+    else if (Array.isArray(d)) { if (Array.isArray(v)) out[k] = v.filter(x => typeof x === 'number' && isFinite(x)).slice(0, 50); }
+    else if (k === 'ach') { if (v && typeof v === 'object') { out.ach = {}; for (const id of Object.keys(v)) if (v[id] === true) out.ach[id] = true; } }
+    else if (k === 'stats') { if (v && typeof v === 'object') { out.stats = {}; for (const id of Object.keys(v)) if (typeof v[id] === 'number' && isFinite(v[id]) && v[id] >= 0) out.stats[id] = v[id]; } }
+  }
+  for (const u of UPGRADES) if (u.id in out) out[u.id] = Math.min(Math.floor(out[u.id]), u.max);   // (a level can never be past its max)
+  if (!Object.keys(out).length) throw new Error('That code did not contain any game progress.');
+  return out;
+}
+function renderSettings(msg, isErr) {
+  card.innerHTML = `<h1>⚙️ SETTINGS</h1>
+    <p class="sub">Take your game to another phone, tablet or computer.</p>
+    <div class="set"><b>Export save</b><small>Copy this code (or download it as a file), then paste it into Import on the other device.</small>
+      <textarea id="expBox" readonly rows="4">${exportCode()}</textarea>
+      <div class="btnrow"><button id="expCopy">Copy code</button><button id="expDl">Download file</button></div></div>
+    <div class="set"><b>Import save</b><small>Paste a code here, or load a saved file. This REPLACES the progress on this device.</small>
+      <textarea id="impBox" rows="4" placeholder="Paste your save code here"></textarea>
+      <div class="btnrow"><button id="impGo">Import</button><button id="impFileBtn">Load from file…</button></div>
+      <input type="file" id="impFile" accept=".txt,.json,text/plain" hidden></div>
+    <div class="setmsg${isErr ? ' err' : ''}" id="setMsg">${msg || ''}</div>
+    <button class="go" id="setBack">BACK</button>
+    <div class="hint"><span class="verline">${versionText()}</span></div>`;
+}
+function openSettings() {
+  if (settingsOpen) return;
+  settingsFrom = titleOpen() ? 'title' : menuOpen ? 'menu' : 'run';
+  if (settingsFrom === 'run') paused = true;                            // the game holds still, and stays paused when you come back
+  settingsOpen = true; title.classList.add('hidden'); overlay.classList.remove('hidden'); renderSettings('');
+  card.scrollTop = 0;
+}
+function closeSettings() {
+  if (!settingsOpen) return;
+  settingsOpen = false;
+  if (settingsFrom === 'title') { overlay.classList.add('hidden'); showTitle(); }
+  else if (settingsFrom === 'menu') showMenu(lastResult);
+  else overlay.classList.add('hidden');
+}
+cogBtn.addEventListener('click', e => { e.stopPropagation(); audio(); openSettings(); });
+const setMsg = (t, err) => { const m = document.getElementById('setMsg'); if (m) { m.textContent = t; m.classList.toggle('err', !!err); } };
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch (e) {}
+  try { const ta = document.getElementById('expBox'); ta.focus(); ta.select(); ta.setSelectionRange(0, t.length); return document.execCommand('copy'); } catch (e) { return false; }
+}
+function doImport(txt) {
+  let out; try { out = parseSaveCode(txt); } catch (e) { setMsg(e.message, true); return; }
+  const rk = rankName(out.prestige || 0), cash = Math.floor(out.cash || 0), alt = Math.floor(out.bestAlt || 0);
+  if (!confirm(`Replace the progress on THIS device with the imported save?\n\nRank: ${rk}\nStash: $${money(cash)}\nHighest: ${money(alt)} m\n\nYour current progress here will be lost.`)) return;
+  const muted = S.muted;
+  for (const k of Object.keys(S)) delete S[k];
+  Object.assign(S, JSON.parse(JSON.stringify(SAVE_DEFAULTS)), out, { muted });
+  save(); setMsg('Imported! Restarting…'); setTimeout(() => location.reload(), 600);
+}
+card.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || !settingsOpen) return;
+  if (b.id === 'setBack') closeSettings();
+  else if (b.id === 'expCopy') copyText(exportCode()).then(ok => setMsg(ok ? 'Copied! Paste it into Import on your other device.' : 'Could not copy automatically: press and hold the code to copy it.', !ok));
+  else if (b.id === 'expDl') {
+    try {
+      const url = URL.createObjectURL(new Blob([exportCode()], { type: 'text/plain' })), a = document.createElement('a');
+      a.href = url; a.download = 'dumpster-divers-save.txt'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setMsg('Saved as dumpster-divers-save.txt');
+    } catch (err) { setMsg('Could not make a file here: use Copy code instead.', true); }
+  }
+  else if (b.id === 'impGo') doImport(document.getElementById('impBox').value);
+  else if (b.id === 'impFileBtn') document.getElementById('impFile').click();
+});
+card.addEventListener('change', e => {
+  if (e.target.id !== 'impFile' || !e.target.files || !e.target.files[0]) return;
+  const f = e.target.files[0], fr = new FileReader();
+  fr.onload = () => { document.getElementById('impBox').value = String(fr.result || '').trim(); setMsg('File loaded. Tap Import to use it.'); };
+  fr.onerror = () => setMsg('Could not read that file.', true);
+  fr.readAsText(f);
+});
+
 /* ============================================================== main loop */
 let last = performance.now();
 function frame(now) {
@@ -1749,6 +1856,7 @@ function frame(now) {
     ctx.restore();
     drawHud();
   }
+  paintPause();
   requestAnimationFrame(frame);
 }
 
