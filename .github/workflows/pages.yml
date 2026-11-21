@@ -25,7 +25,7 @@ jobs:
       - name: Stage site
         run: |
           mkdir _site
-          cp index.html _site/
+          cp index.html manifest.webmanifest sw.js _site/
           # stamp this deploy with the short commit code so the in-game version label shows exactly which build is live
           sed -i "s/__BUILD__/${GITHUB_SHA::7}/" _site/index.html
           cp -r assets _site/

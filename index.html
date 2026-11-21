@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Dumpster Divers</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b1036">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Dumpster Divers">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="assets/icons/icon-192.png">
 <style>
   :root { color-scheme: dark; --ink:#f4ead2; --accent:#ffcf4a; --panel:rgba(12,14,26,.9); }
   html, body { margin:0; height:100%; background:#07080f; overflow:hidden;
@@ -66,6 +74,10 @@
   .verline { opacity:.7; font-size:.95em; }
   #mute, #pause, #cog { position:absolute; top:.5em; z-index:5; width:2.2em; height:2.2em; padding:0; font-size:1.2em; line-height:2.2em; text-align:center;
     background:rgba(0,0,0,.45); color:#fff; box-shadow:none; border-radius:.5em; }
+  .pill { margin-top:.7em; font-size:.95em; padding:.5em 1em; background:rgba(5,6,14,.7); color:var(--ink); border:.1em solid rgba(255,255,255,.35); box-shadow:none; }
+  .pill.hidden { display:none; }
+  #title .inst { display:flex; gap:.6em; justify-content:center; flex-wrap:wrap; }
+  .set.disp { display:block; } .set.disp.hidden { display:none; }
   #pause { right:.5em; } #mute { right:2.95em; } #cog { right:5.4em; }
   #pause.hidden { display:none; }
   .set { text-align:left; background:rgba(255,255,255,.06); border-radius:.7em; padding:.7em .8em; margin:.55em 0; }
@@ -89,6 +101,7 @@
     <div class="cta">
       <button id="start">START</button>
       <div class="tip">Bounce the hobos, grab the junk, don’t hit the pavement.<br>Steer with your mouse, finger, or ← → keys.</div>
+      <div class="inst"><button class="pill hidden" id="installBtn">📲 Install app</button><button class="pill hidden" id="fsBtn">⛶ Full screen</button></div>
     </div>
   </div>
 </div>
@@ -101,7 +114,7 @@
 /* Version: MAJOR.MINOR.PATCH. The leading 0 means BETA and stays 0 until the game leaves beta.
    Bump MINOR for new features and PATCH for fixes. BUILD is stamped with the commit code by the deploy workflow
    (it shows "dev" when running locally), so a phone can tell exactly which build it has loaded. */
-const VERSION = '0.16.1', BUILD = '__BUILD__';
+const VERSION = '0.17.0', BUILD = '__BUILD__';
 const versionText = () => `v${VERSION} beta · build ${BUILD.startsWith('__') ? 'dev' : BUILD} · ${audioStatus()}`;
 
 const W = 450, H = 800;           // tall + narrow playfield, same on every device
@@ -1772,7 +1785,9 @@ function parseSaveCode(txt) {                        // turns a pasted code back
 }
 function renderSettings(msg, isErr) {
   card.innerHTML = `<h1>⚙️ SETTINGS</h1>
-    <p class="sub">Take your game to another phone, tablet or computer.</p>
+    <p class="sub">Display, and taking your game to another device.</p>
+    <div class="set disp hidden" id="dispBox"><b>Display</b><small>Play full screen, or install it like an app.</small>
+      <div class="btnrow"><button id="setFs" class="hidden">⛶ Full screen</button><button id="setInstall" class="hidden">📲 Install app</button></div></div>
     <div class="set"><b>Export save</b><small>Copy this code (or download it as a file), then paste it into Import on the other device.</small>
       <textarea id="expBox" readonly rows="4">${exportCode()}</textarea>
       <div class="btnrow"><button id="expCopy">Copy code</button><button id="expDl">Download file</button></div></div>
@@ -1783,6 +1798,7 @@ function renderSettings(msg, isErr) {
     <div class="setmsg${isErr ? ' err' : ''}" id="setMsg">${msg || ''}</div>
     <button class="go" id="setBack">BACK</button>
     <div class="hint"><span class="verline">${versionText()}</span></div>`;
+  paintDisplayButtons();
 }
 function openSettings() {
   if (settingsOpen) return;
@@ -1826,6 +1842,8 @@ card.addEventListener('click', e => {
   }
   else if (b.id === 'impGo') doImport(document.getElementById('impBox').value);
   else if (b.id === 'impFileBtn') document.getElementById('impFile').click();
+  else if (b.id === 'setFs') toggleFullscreen();
+  else if (b.id === 'setInstall') installApp();
 });
 card.addEventListener('change', e => {
   if (e.target.id !== 'impFile' || !e.target.files || !e.target.files[0]) return;
@@ -1834,6 +1852,56 @@ card.addEventListener('change', e => {
   fr.onerror = () => setMsg('Could not read that file.', true);
   fr.readAsText(f);
 });
+
+/* ============================================================== install as an app, and full screen */
+const isStandalone = () => (window.matchMedia && (matchMedia('(display-mode: standalone)').matches || (matchMedia('(display-mode: fullscreen)').matches && !inFullscreen()))) || navigator.standalone === true;   // (the browser also says "fullscreen" while OUR full-screen button is on, which is not an installed app)
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let installEvt = null;                              // Chrome / Edge / Android hand us a "install" prompt we can fire from our own button
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; paintDisplayButtons(); });
+window.addEventListener('appinstalled', () => { installEvt = null; paintDisplayButtons(); });
+const canInstall = () => !isStandalone() && (!!installEvt || isIOS);          // (iPhones have no prompt, so we show how to do it by hand)
+const fsDoc = document, fsRoot = document.documentElement;
+const canFullscreen = () => !isStandalone() && !!(fsDoc.fullscreenEnabled || fsDoc.webkitFullscreenEnabled) && !!(fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen);
+const inFullscreen = () => !!(fsDoc.fullscreenElement || fsDoc.webkitFullscreenElement);
+function toggleFullscreen() {
+  try {
+    if (inFullscreen()) (fsDoc.exitFullscreen || fsDoc.webkitExitFullscreen).call(fsDoc);
+    else { const r = (fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen).call(fsRoot, { navigationUI: 'hide' }); if (r && r.catch) r.catch(() => {}); }
+  } catch (e) {}
+}
+function installApp() {
+  if (installEvt) {
+    const ev = installEvt; installEvt = null;
+    ev.prompt(); if (ev.userChoice && ev.userChoice.finally) ev.userChoice.finally(paintDisplayButtons);
+    paintDisplayButtons();
+  } else if (isIOS) openInstallHelp();
+}
+function paintDisplayButtons() {
+  const ib = document.getElementById('installBtn'), fb = document.getElementById('fsBtn');
+  ib.classList.toggle('hidden', !canInstall()); fb.classList.toggle('hidden', !canFullscreen());
+  fb.textContent = inFullscreen() ? '⛶ Exit full screen' : '⛶ Full screen';
+  const si = document.getElementById('setInstall'), sf = document.getElementById('setFs'), box = document.getElementById('dispBox');
+  if (si) si.classList.toggle('hidden', !canInstall());
+  if (sf) { sf.classList.toggle('hidden', !canFullscreen()); sf.textContent = inFullscreen() ? '⛶ Exit full screen' : '⛶ Full screen'; }
+  if (box) box.classList.toggle('hidden', !canInstall() && !canFullscreen());
+}
+document.getElementById('installBtn').addEventListener('click', e => { e.stopPropagation(); audio(); installApp(); });
+document.getElementById('fsBtn').addEventListener('click', e => { e.stopPropagation(); audio(); toggleFullscreen(); });
+for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) fsDoc.addEventListener(ev, paintDisplayButtons);
+function openInstallHelp() {                        // iPhone / iPad: there is no install button in Safari, so say exactly what to tap
+  const from = titleOpen() ? 'title' : menuOpen ? 'menu' : 'run';
+  if (!settingsOpen) { settingsFrom = from; if (from === 'run') paused = true; }
+  settingsOpen = true; title.classList.add('hidden'); overlay.classList.remove('hidden');
+  card.innerHTML = `<h1>📲 INSTALL</h1><p class="sub">Put Dumpster Divers on your home screen. It opens full screen, like a real app, and works without a signal.</p>
+    <div class="set"><b>On iPhone or iPad (Safari)</b><small style="opacity:1;font-size:.95em;line-height:1.5">
+      1. Tap the <b style="display:inline">Share</b> button (the square with an arrow, at the bottom or top of Safari).<br>
+      2. Scroll down and tap <b style="display:inline">Add to Home Screen</b>.<br>
+      3. Tap <b style="display:inline">Add</b>. Open it from the new icon.</small></div>
+    <div class="set"><b>Using another browser?</b><small style="opacity:1;font-size:.95em;line-height:1.5">On iPhone, only Safari can install it. Open this page in Safari first.</small></div>
+    <button class="go" id="setBack">BACK</button>`;
+  card.scrollTop = 0;
+}
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 
 /* ============================================================== main loop */
 let last = performance.now();
@@ -1868,6 +1936,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) audi
 if (!S.achBackfill) { statMax('height', S.bestAlt || 0); checkMaxUps(); S.achBackfill = true; save(); }   // one time only, so "reset achievements" sticks
 newRun();
 showTitle();
+paintDisplayButtons();
 requestAnimationFrame(frame);
 
 // small hook so the game can be driven by automated tests
